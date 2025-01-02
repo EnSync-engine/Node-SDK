@@ -4,12 +4,12 @@ const {
 
 const response = async () => {
     try {
-        const eventName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL"
+        const eventName = "adyen/payment/POS/PAYMENT_SUCCESSFUL"
         const ensyncClient = new EnSyncEngine("localhost", "8443", {disableTls: true})
-        const client = await ensyncClient.createClient("xxxxxxxxx")
+        const client = await ensyncClient.createClient("Nedo7tix68Abk9SZb2XU5jDs71x4BTop")
 
         // You have to subscribe to the event before you pullRecords else the system would not identify your client as subscribed to receive this event
-        const sub = await client.subscribe(eventName2, {subscribeOnly: false})
+        const sub = await client.subscribe(eventName, {subscribeOnly: false})
 
         sub.pull({autoAck: false},
          async (event) => {
@@ -18,7 +18,7 @@ const response = async () => {
            // Acknowledge message read
            const ack = await client.ack(event.id, event.block)
            // Unsubscribe
-           await eventSubscription.unsubscribe(eventName)
+          //  await sub.unsubscribe(eventName)
            console.log("acknowledged", event.id, ack, "\n")
           } catch (e) {
            console.log("Exception", e)

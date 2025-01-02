@@ -8,26 +8,30 @@ const RENEW_AT = 420000
 let renewTimeout;
 
 class EnSyncEngine {
+    #client;
+    #config;
+    #internalAction;
+
    constructor(host, port, {version = "v1", disableTls = false}) {
       if (disableTls) process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
-      this.config = {
+      this.#config = {
        version: version,
        clientId: null,
        accessKey: ""
       }
-      this.internalAction = {
+      this.#internalAction = {
           pausePulling: [],
           stopPulling: [],
           endSession: false
       }
 
-      this.client = http2.connect(`https://${host}:${port}`);
-      this.client.on('error', (err) => {throw new EnSyncError(err)})
+      this.#client = http2.connect(`https://${host}:${port}`);
+      this.#client.on('error', (err) => {throw new EnSyncError(err)})
     }
 
     #removeFromStoppedPullingList (eventName) {
-     const toRemove = this.internalAction.pausePulling.findIndex(eName => eName === eventName)
-     this.internalAction.stopPulling.splice(toRemove, 1)
+     const toRemove = this.#internalAction.pausePulling.findIndex(eName => eName === eventName)
+     this.#internalAction.stopPulling.splice(toRemove, 1)
     }
 
    #convertKeyValueToObject(data, options = {}) {
@@ -51,8 +55,8 @@ class EnSyncEngine {
     let data = '';
 
      return new Promise((resolved, rejected) => {
-      const req = this.client.request({
-       ":path": `/http/${this.config.version}/client`,
+      const req = this.#client.request({
+       ":path": `/http/${this.#config.version}/client`,
        ':method': 'POST'
       });
 
@@ -80,10 +84,10 @@ class EnSyncEngine {
         const data = await this.#createRequest(`CONN;ACCESS_KEY=${accessKey}`)
         const content = data.replace("+PASS:", "")
         const res = this.#convertKeyValueToObject(content)
-        this.config.clientId = res.clientId
-        this.config.accessKey = accessKey
+        this.#config.clientId = res.clientId
+        this.#config.accessKey = accessKey
         
-        renewTimeout = setTimeout(() => this.#reconnect(this.config.clientId, this.config.accessKey), RENEW_AT)
+        renewTimeout = setTimeout(() => this.#reconnect(this.#config.clientId, this.#config.accessKey), RENEW_AT)
         return this
     } catch(e) {
       throw new EnSyncError(e, "EnSyncConnectionError")
@@ -92,7 +96,7 @@ class EnSyncEngine {
 
    async #reconnect (clientId, accessKey) {
     try {
-        if (this.internalAction.endSession) return;
+        if (this.#internalAction.endSession) return;
         const payload = `RENEW;CLIENT_ID=${clientId};ACCESS_KEY=${accessKey}`
         const data = await this.#createRequest(payload)
 
@@ -100,7 +104,7 @@ class EnSyncEngine {
         const content = data.replace("+PASS:", "")
         const res = this.#convertKeyValueToObject(content)
 
-        this.config.clientId = res.clientId
+        this.#config.clientId = res.clientId
 
         renewTimeout = setTimeout(() => this.#reconnect(res.clientId, accessKey), RENEW_AT)
         return data
@@ -110,9 +114,9 @@ class EnSyncEngine {
    }
 
    async publish (eventName, payload = {}) {
-    if (!this.config.clientId) throw new EnSyncError("Cannot publish an event when you haven't created a client")
+    if (!this.#config.clientId) throw new EnSyncError("Cannot publish an event when you haven't created a client")
     try {
-        return await this.#createRequest(`PUB;CLIENT_ID=${this.config.clientId};EVENT_NAME=${eventName};PAYLOAD=${JSON.stringify(payload)}`)
+        return await this.#createRequest(`PUB;CLIENT_ID=${this.#config.clientId};EVENT_NAME=${eventName};PAYLOAD=${JSON.stringify(payload)}`)
     } catch (e) {
         throw new EnSyncError(e, "EnSyncGenericError")
     }
@@ -120,12 +124,12 @@ class EnSyncEngine {
 
    async subscribe (eventName) {
     try {
-        if (!this.config.clientId) throw new EnSyncError("Cannot publish an event when you haven't created a client")
+        if (!this.#config.clientId) throw new EnSyncError("Cannot publish an event when you haven't created a client")
         if (!eventName.trim() && typeof eventName !== "string") throw Error("EventName to subscribe to is not passed")
 
          // Let's ensure this eventName is not in the stopped list
          this.#removeFromStoppedPullingList(eventName)
-        await this.#createRequest(`SUB;CLIENT_ID=${this.config.clientId};EVENT_NAME=${eventName}`)
+        await this.#createRequest(`SUB;CLIENT_ID=${this.#config.clientId};EVENT_NAME=${eventName}`)
         return {
             pull: (options, callback) => this.#pullRecords(eventName, options, callback),
             stream: (options, callback) => this.#streamRecords(eventName, options, callback),
@@ -156,9 +160,9 @@ class EnSyncEngine {
 
    async #streamRecords (eventName, options, callback = async () => {}) {
     try {
-        if (this.internalAction.endSession) return;
+        if (this.#internalAction.endSession) return;
         const {autoAck = false} = options
-        this.#createRequest(`STREAM;CLIENT_ID=${this.config.clientId};EVENT_NAME=${eventName}`, async (data) => this.#handlePulledRecords(data, autoAck, callback))
+        this.#createRequest(`STREAM;CLIENT_ID=${this.#config.clientId};EVENT_NAME=${eventName}`, async (data) => this.#handlePulledRecords(data, autoAck, callback))
     } catch (e) {
         throw new  EnSyncError(e?.message, "EnSyncGenericError")
     }
@@ -166,9 +170,9 @@ class EnSyncEngine {
 
    async #pullRecords (eventName, options, callback = async () => {}) {
     try {
-        if (this.internalAction.endSession) return;
+        if (this.#internalAction.endSession) return;
         const {autoAck = false} = options
-        const data = await this.#createRequest(`PULL;CLIENT_ID=${this.config.clientId};EVENT_NAME=${eventName}`)
+        const data = await this.#createRequest(`PULL;CLIENT_ID=${this.#config.clientId};EVENT_NAME=${eventName}`)
         await this.#handlePulledRecords(data, autoAck, callback)
         this.#pullRecords(eventName, options, callback)
     } catch (e) {
@@ -178,7 +182,7 @@ class EnSyncEngine {
 
    async ack (eventIdem, block) {
     try {
-        const payload = `ACK;CLIENT_ID=${this.config.clientId};EVENT_IDEM=${eventIdem};BLOCK=${block}`
+        const payload = `ACK;CLIENT_ID=${this.#config.clientId};EVENT_IDEM=${eventIdem};BLOCK=${block}`
         const data = await this.#createRequest(payload)
         return data
     } catch (e) {
@@ -187,15 +191,15 @@ class EnSyncEngine {
    }
 
    async #unsubscribe (eventName) {
-    const resp = await this.#createRequest(`UNSUB;CLIENT_ID=${this.config.clientId};EVENT_NAME=${eventName}`)
-    this.internalAction.stopPulling.push(eventName)
+    const resp = await this.#createRequest(`UNSUB;CLIENT_ID=${this.#config.clientId};EVENT_NAME=${eventName}`)
+    this.#internalAction.stopPulling.push(eventName)
     return resp
    }
 
    close () {
-    this.internalAction.endSession = true
+    this.#internalAction.endSession = true
     if (renewTimeout) clearTimeout(renewTimeout)
-    this.client.close()
+    this.#client.close()
    }
 }
 

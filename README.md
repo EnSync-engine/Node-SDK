@@ -110,7 +110,7 @@ const response = async () => {
         const client = await ensyncClient.createClient("xxxxxxxxx")
 
         // You have to subscribe to the event before you pullRecords else the system would not identify your client as subscribed to receive this event
-        const sub = await client.subscribe(eventName2, {subscribeOnly: false})
+        const sub = await client.subscribe(eventName, {subscribeOnly: false})
 
         sub.pull({autoAck: false},
          async (event) => {
@@ -119,7 +119,7 @@ const response = async () => {
            // Acknowledge message read
            const ack = await client.ack(event.id, event.block)
            // Unsubscribe
-           await eventSubscription.unsubscribe(eventName)
+           await sub.unsubscribe(eventName)
            console.log("acknowledged", event.id, ack, "\n")
           } catch (e) {
            console.log("Exception", e)
