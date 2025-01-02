@@ -1,0 +1,15 @@
+{
+  "name": "ensync-client-sdk",
+  "version": "0.0.2",
+  "description": "Client SDK for EnSync Engine",
+  "main": "client.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "jsdoc": "^4.0.4"
+  }
+}
