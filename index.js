@@ -7,12 +7,16 @@ const {
 const RENEW_AT = 420000
 let renewTimeout;
 
+const wait = (ms) => {
+    return new Promise( (resolve) => {setTimeout(resolve, ms)});
+}
+
 class EnSyncEngine {
     #client;
     #config;
     #internalAction;
 
-   constructor(host, port, {version = "v1", disableTls = false}) {
+   constructor(host, port, {version = "v1", disableTls = false, ignoreException = false}) {
       if (disableTls) process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
       this.#config = {
        version: version,
@@ -26,7 +30,9 @@ class EnSyncEngine {
       }
 
       this.#client = http2.connect(`https://${host}:${port}`);
-      this.#client.on('error', (err) => {throw new EnSyncError(err)})
+      this.#client.on('error', (err) => {
+        this.#client = http2.connect(`https://${host}:${port}`);
+      })
     }
 
     #removeFromStoppedPullingList (eventName) {
@@ -113,7 +119,7 @@ class EnSyncEngine {
     }
    }
 
-   async publish (eventName, payload = {}) {
+   async publish (eventName, payload = {}, props = {}) {
     if (!this.#config.clientId) throw new EnSyncError("Cannot publish an event when you haven't created a client")
     try {
         return await this.#createRequest(`PUB;CLIENT_ID=${this.#config.clientId};EVENT_NAME=${eventName};PAYLOAD=${JSON.stringify(payload)}`)
@@ -125,7 +131,7 @@ class EnSyncEngine {
    async subscribe (eventName) {
     try {
         if (!this.#config.clientId) throw new EnSyncError("Cannot publish an event when you haven't created a client")
-        if (!eventName.trim() && typeof eventName !== "string") throw Error("EventName to subscribe to is not passed")
+        if (!eventName?.trim() && typeof eventName !== "string") throw Error("EventName to subscribe to is not passed")
 
          // Let's ensure this eventName is not in the stopped list
          this.#removeFromStoppedPullingList(eventName)
@@ -171,9 +177,10 @@ class EnSyncEngine {
    async #pullRecords (eventName, options, callback = async () => {}) {
     try {
         if (this.#internalAction.endSession) return;
-        const {autoAck = false} = options
+        const {autoAck = true} = options
         const data = await this.#createRequest(`PULL;CLIENT_ID=${this.#config.clientId};EVENT_NAME=${eventName}`)
         await this.#handlePulledRecords(data, autoAck, callback)
+        await wait(1)
         this.#pullRecords(eventName, options, callback)
     } catch (e) {
         throw new  EnSyncError(e?.message, "EnSyncGenericError")
