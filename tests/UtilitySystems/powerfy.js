@@ -17,11 +17,11 @@ args.forEach((arg, index) => {
 
 const powerSystem = async () => {
  const maximumPowerOutput = 1000 // In kWh 
- const minimumPowerOutput = 20 // In Celsius 
+ const minimumPowerOutput = 20 // In kWh 
  const doNotExceed = 800
 
  // Event created
- const ensyncClient = new EnSyncEngine("localhost", "8443", {disableTls: true})
+ const ensyncClient = new EnSyncEngine("http://localhost:8082", {disableTls: true})
  const client = await ensyncClient.createClient(accessKey)
  // Generate random power usage
  while(true) {
@@ -37,6 +37,7 @@ const powerSystem = async () => {
 
    // Usage is starting to get too high
    const tooHigh = await client.publish(powerUsageHighEventName, {"current.kWh":currentOutput, "dateTime": Date.now()})
+   await client.publish(powerUsageEventName, {"current.kWh": currentOutput, "dateTime": Date.now()})
    console.log("tooHigh", tooHigh)
    client.close()
    break;

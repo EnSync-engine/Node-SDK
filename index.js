@@ -16,23 +16,27 @@ class EnSyncEngine {
     #config;
     #internalAction;
 
-   constructor(host, port, {version = "v1", disableTls = false, ignoreException = false}) {
-      if (disableTls) process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
-      this.#config = {
-       version: version,
-       clientId: null,
-       accessKey: ""
-      }
-      this.#internalAction = {
-          pausePulling: [],
-          stopPulling: [],
-          endSession: false
-      }
+   constructor(ensyncURL, {version = "v1", disableTls = false, ignoreException = false}) {
+        this.#config = {
+            version: version,
+            clientId: null,
+            client: `/http/${version}/client`,
+            accessKey: "",
+            isSecure: ensyncURL.startsWith("https"),
+            ensyncURL
+        }
+        this.#internalAction = {
+            pausePulling: [],
+            stopPulling: [],
+            endSession: false
+        }
 
-      this.#client = http2.connect(`https://${host}:${port}`);
-      this.#client.on('error', (err) => {
-        this.#client = http2.connect(`https://${host}:${port}`);
-      })
+        if (this.#config.isSecure) {
+            if (disableTls) process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
+            this.#config.httpURL = 
+            this.#client = http2.connect(ensyncURL);
+            this.#client.on('error', (err) => { this.#client = http2.connect(ensyncURL) })
+        }
     }
 
     #removeFromStoppedPullingList (eventName) {
@@ -43,6 +47,8 @@ class EnSyncEngine {
    #convertKeyValueToObject(data, options = {}) {
     const {startsWith = "{", endsWith = "}"} = options
     const convertedRecords = {}
+
+    if (!data.length) throw new EnSyncError("No data found", "EnSyncGenericError")
     // Remove the curly braces wrapping the data
     const items = data.startsWith(startsWith) && data.endsWith(endsWith) ? data.substring(1,data.length-1).split(",") : data.split(",")
     items.forEach((item, i) => {
@@ -59,30 +65,49 @@ class EnSyncEngine {
 
    #createRequest(command, callback) {
     let data = '';
-
-     return new Promise((resolved, rejected) => {
-      const req = this.#client.request({
-       ":path": `/http/${this.#config.version}/client`,
-       ':method': 'POST'
-      });
-
-      req.setEncoding("utf8")
-      req.write(command)
-
-      req.on('error', rejected).on('response', () => {
-     });
-
-     req.on('data', async chunk => { 
-      data += chunk;
-      if (callback) await callback(chunk)
-     })
-     .on('end', () => {
-       if (data.startsWith("-FAIL:"))
-         throw new EnSyncError(data, "EnSyncGenericError")
-       resolved(data);
-     });
-      req.end()
-    })
+    if (this.#config.isSecure) {
+        return new Promise((resolved, rejected) => {
+            const req = this.#client.request({
+             ":path": `/http/${this.#config.version}/client`,
+             ':method': 'POST'
+            });
+      
+            req.setEncoding("utf8")
+            req.write(command)
+      
+            req.on('error', rejected).on('response', () => {
+           });
+      
+           req.on('data', async chunk => { 
+            data += chunk;
+            if (callback) await callback(chunk)
+           })
+           .on('end', () => {
+             if (data.startsWith("-FAIL:"))
+               throw new EnSyncError(data, "EnSyncGenericError")
+             resolved(data);
+           });
+            req.end()
+        })
+    } else {
+        return new Promise(async (resolved, rejected) => {
+            const url = `${this.#config.ensyncURL}/http/${this.#config.version}/client`
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    body: command
+                })
+                const data = await response.text()
+                if (data.startsWith("-FAIL:"))
+                    throw new EnSyncError(data, "EnSyncGenericError")
+                
+                if (callback) await callback(chunk)
+                resolved(data);
+            } catch(err) {
+                rejected(new EnSyncError(err.message, "EnSyncGenericError"))
+            }
+        })
+    }
    }
 
    async createClient (accessKey) {
@@ -93,14 +118,14 @@ class EnSyncEngine {
         this.#config.clientId = res.clientId
         this.#config.accessKey = accessKey
         
-        renewTimeout = setTimeout(() => this.#reconnect(this.#config.clientId, this.#config.accessKey), RENEW_AT)
+        renewTimeout = setTimeout(() => this.#renewClient(this.#config.clientId, this.#config.accessKey), RENEW_AT)
         return this
     } catch(e) {
       throw new EnSyncError(e, "EnSyncConnectionError")
     }
    }
 
-   async #reconnect (clientId, accessKey) {
+   async #renewClient (clientId, accessKey) {
     try {
         if (this.#internalAction.endSession) return;
         const payload = `RENEW;CLIENT_ID=${clientId};ACCESS_KEY=${accessKey}`
@@ -112,7 +137,7 @@ class EnSyncEngine {
 
         this.#config.clientId = res.clientId
 
-        renewTimeout = setTimeout(() => this.#reconnect(res.clientId, accessKey), RENEW_AT)
+        renewTimeout = setTimeout(() => this.#renewClient(res.clientId, accessKey), RENEW_AT)
         return data
     } catch (e) {
      throw new EnSyncError(e, "EnSyncConnectionError")
@@ -138,6 +163,7 @@ class EnSyncEngine {
         await this.#createRequest(`SUB;CLIENT_ID=${this.#config.clientId};EVENT_NAME=${eventName}`)
         return {
             pull: (options, callback) => this.#pullRecords(eventName, options, callback),
+            ack: (eventIdem, block) => this.#ack(eventIdem, block),
             stream: (options, callback) => this.#streamRecords(eventName, options, callback),
             unsubscribe: async () => {return await this.#unsubscribe(eventName)}
         }
@@ -180,14 +206,14 @@ class EnSyncEngine {
         const {autoAck = true} = options
         const data = await this.#createRequest(`PULL;CLIENT_ID=${this.#config.clientId};EVENT_NAME=${eventName}`)
         await this.#handlePulledRecords(data, autoAck, callback)
-        await wait(1)
+        await wait(3)
         this.#pullRecords(eventName, options, callback)
     } catch (e) {
         throw new  EnSyncError(e?.message, "EnSyncGenericError")
     }
    }
 
-   async ack (eventIdem, block) {
+   async #ack (eventIdem, block) {
     try {
         const payload = `ACK;CLIENT_ID=${this.#config.clientId};EVENT_IDEM=${eventIdem};BLOCK=${block}`
         const data = await this.#createRequest(payload)
@@ -206,7 +232,7 @@ class EnSyncEngine {
    close () {
     this.#internalAction.endSession = true
     if (renewTimeout) clearTimeout(renewTimeout)
-    this.#client.close()
+    if (this.#config.isSecure) this.#client.close()
    }
 }
 
