@@ -8,8 +8,8 @@ npm install ensync-client-sdk
 
 ## Full Documentation
 
-See <https://docs.tryensync.com/> for documentation on EnSync Engine
-See <https://docs.tryensync.com/usage> for documentation on Our SDK
+See <https://docs.tryensync.com/start> for documentation on EnSync Engine
+See <https://docs.tryensync.com/sdk/node> for documentation on Our SDK
 
 ## How to Use
 
@@ -22,10 +22,11 @@ import {EnSyncEngine, EnSyncError} from "ensync-client-sdk"
 To connect to an EnSync engine, use the command
 
 ```
-new EnSyncEngine("ip_addr or localhost>, <ensync_engine_port>, <props>)
+new EnSyncEngine("<url_to_your_ensync>>", <props>)
 ```
+Do note that you can connect using http or https. We recommend you use https as this would use http/2 under the hood to improve communication with the engine
 
-List of supported props would be listed soon
+#### List of supported props would be listed soon
 
 To communicate with the engine, you would need to create a client (which generates a client Id) which would be used to initiate other actions on the engine's delivery system. To create a client use the below code
 
@@ -35,25 +36,25 @@ const client = await ensyncClient.createClient(<access_token>)
 
 With you client now created, you can now start communication with the engine.
 
-To Publish a message:
+#### To Publish a message:
 
 ```
 await client.publish(<event_name>, <payload>)
 ```
 
-To Subscribe to a message
+#### To Subscribe to a message
 
 ```
 const sub = await client.subscribe(<event_name>, {subscribeOnly: false})
 ```
 
-To Unsubscribe
+#### To Unsubscribe
 
 ```
 sub.unsubscribe()
 ```
 
-To pull and acknowledge messages published to an event name use:
+#### To pull and acknowledge messages published to an event name use:
 
 ```
 sub.pull({autoAck: false}, async (event) => {
@@ -63,7 +64,7 @@ sub.pull({autoAck: false}, async (event) => {
 })
 ```
 
-To Close connection, use:
+#### To Close connection, use:
 
 ```
 client.close()
@@ -79,7 +80,7 @@ const {
 const response = async () => {
     try {
         const eventName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL" // Event Created using the ensync-cli see ()
-        const ensyncClient = new EnSyncEngine("localhost", "8443", {disableTls: true})
+        const ensyncClient = new EnSyncEngine("https://localhost:8443", {disableTls: true})
         const client = await ensyncClient.createClient("xxxxxxxxxxxxxxxxxx")
 
         // Imitates microservice sending multiple events
@@ -106,7 +107,7 @@ const {
 const response = async () => {
     try {
         const eventName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL"
-        const ensyncClient = new EnSyncEngine("localhost", "8443", {disableTls: true})
+        const ensyncClient = new EnSyncEngine("https://localhost:8443", {disableTls: true})
         const client = await ensyncClient.createClient("xxxxxxxxx")
 
         // You have to subscribe to the event before you pullRecords else the system would not identify your client as subscribed to receive this event
@@ -117,7 +118,7 @@ const response = async () => {
           try {
            console.log("event 1", event)
            // Acknowledge message read
-           const ack = await client.ack(event.id, event.block)
+           const ack = await sub.ack(event.id, event.block)
            // Unsubscribe
            await sub.unsubscribe(eventName)
            console.log("acknowledged", event.id, ack, "\n")
