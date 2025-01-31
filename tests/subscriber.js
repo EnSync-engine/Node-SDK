@@ -5,7 +5,7 @@ const {
 const response = async () => {
     try {
         const eventName = "mycompany/thirdparty/fintech/payapp"
-        const ensyncClient = new EnSyncEngine("localhost", "8443", {disableTls: true})
+        const ensyncClient = new EnSyncEngine( "https://localhost:8443", {disableTls: true})
         const client = await ensyncClient.createClient("PrChWGTPMZ0lQCruPVmAOw7V8JYxomjd")
 
         // You have to subscribe to the event before you pullRecords else the system would not identify your client as subscribed to receive this event

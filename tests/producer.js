@@ -6,7 +6,7 @@ const response = async () => {
     try {
         // const eventName = "adyen/payment/POS/PAYMENT_SUCCESSFUL" // Event Created using the ensync-cli see ()
         const eventName = "mycompany/thirdparty/fintech/payapp" // Event Created using the ensync-cli see ()
-        const ensyncClient = new EnSyncEngine("localhost", "8443", {disableTls: true})
+        const ensyncClient = new EnSyncEngine("https://localhost:8443", {disableTls: true})
         const client = await ensyncClient.createClient("ZfQWI7w4MpDj7WLJMg3pDHPwtNc7jsUz")
         console.log("client", client)
 
