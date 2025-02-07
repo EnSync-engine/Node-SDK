@@ -9,13 +9,26 @@ let renewTimeout;
 
 const wait = (ms) => {
     return new Promise((resolve) => { setTimeout(resolve, ms) });
-  }
+}
 
+/**
+ * EnSyncEngine is the main class that manages connections and client creation for the EnSync system.
+ * It handles secure connections, client renewals, and provides the interface for creating EnSync clients.
+ */
 class EnSyncEngine {
     #client;
     #config;
     #internalAction;
 
+    /**
+     * Creates a new instance of EnSyncEngine
+     * @param {string} ensyncURL - The URL of the EnSync server
+     * @param {Object} options - Configuration options
+     * @param {string} [options.version='v1'] - API version to use
+     * @param {boolean} [options.disableTls=false] - Whether to disable TLS verification
+     * @param {boolean} [options.ignoreException=false] - Whether to ignore exceptions
+     * @param {number} [options.renewAt=420000] - Time in milliseconds before client renewal
+     */
     constructor(ensyncURL, {version = "v1", disableTls = false, ignoreException = false, renewAt = 420000}) {
         RENEW_AT = renewAt
         this.#config = {
@@ -40,6 +53,15 @@ class EnSyncEngine {
         }
     }
 
+    /**
+     * Converts a key-value string to an object
+     * @private
+     * @param {string} data - The data string to convert
+     * @param {Object} [options={}] - Conversion options
+     * @param {string} [options.startsWith='{'] - Starting character
+     * @param {string} [options.endsWith='}'] - Ending character
+     * @returns {Object} The converted object
+     */
     #convertKeyValueToObject(data, options = {}) {
         const {startsWith = "{", endsWith = "}"} = options
         const convertedRecords = {}
@@ -55,6 +77,13 @@ class EnSyncEngine {
         return convertedRecords
     }
 
+    /**
+     * Creates a request to the EnSync server
+     * @private
+     * @param {string} command - The command to send
+     * @param {Function} [callback] - Optional callback for streaming responses
+     * @returns {Promise<string>} The server response
+     */
     async #createRequest(command, callback) {
         let data = '';
         if (this.#config.isSecure) {
@@ -102,6 +131,13 @@ class EnSyncEngine {
         }
     }
 
+    /**
+     * Renews the client connection
+     * @private
+     * @param {string} clientId - The client ID to renew
+     * @param {string} accessKey - The access key for authentication
+     * @returns {Promise<string>} The renewal response
+     */
     async #renewClient(clientId, accessKey) {
         try {
             if (this.#internalAction.endSession) return;
@@ -121,6 +157,12 @@ class EnSyncEngine {
         }
     }
 
+    /**
+     * Creates a new EnSync client
+     * @param {string} accessKey - The access key for authentication
+     * @returns {Promise<EnSyncClient>} A new EnSync client instance
+     * @throws {EnSyncError} If client creation fails
+     */
     async createClient(accessKey) {
         try {
             const data = await this.#createRequest(`CONN;ACCESS_KEY=${accessKey}`)
@@ -136,29 +178,57 @@ class EnSyncEngine {
         }
     }
 
+    /**
+     * Closes the engine connection and stops all client operations
+     */
     close() {
         this.#internalAction.endSession = true
         if (renewTimeout) clearTimeout(renewTimeout)
         if (this.#config.isSecure) this.#client.close()
     }
 
-    // Inner EnSyncClient class
+    /**
+     * EnSyncClient provides the interface for publishing and subscribing to events in the EnSync system.
+     * It handles event streaming, record pulling, and acknowledgments.
+     */
     EnSyncClient = class {
         #engine;
 
+        /**
+         * Creates a new EnSyncClient instance
+         * @param {EnSyncEngine} engine - The parent EnSyncEngine instance
+         */
         constructor(engine) {
             this.#engine = engine;
         }
 
+        /**
+         * Removes an event from the stopped pulling list
+         * @private
+         * @param {string} eventName - The name of the event to remove
+         */
         #removeFromStoppedPullingList(eventName) {
             const toRemove = this.#engine.#internalAction.pausePulling.findIndex(eName => eName === eventName);
             this.#engine.#internalAction.stopPulling.splice(toRemove, 1);
         }
 
+        /**
+         * Converts a key-value string to an object
+         * @private
+         * @param {string} data - The data string to convert
+         * @returns {string} The converted string ready for JSON parsing
+         */
         #convertKeyValueToObj(data) {
             return data.replace(/(\w+)=/g, '"$1"=').replace(/=(\w+)/g, '="$1"').replaceAll("=", ": ");
         }
 
+        /**
+         * Handles pulled records from the server
+         * @private
+         * @param {string} data - The record data
+         * @param {boolean} autoAck - Whether to automatically acknowledge records
+         * @param {Function} callback - Callback to handle the record
+         */
         async #handlePulledRecords(data, autoAck, callback) {
             if (data.startsWith("-FAIL:")) throw new EnSyncError(data, "EnSyncGenericError");
             if (data.startsWith("+RECORD:")) {
@@ -175,6 +245,14 @@ class EnSyncEngine {
             }
         }
 
+        /**
+         * Streams records for a given event
+         * @private
+         * @param {string} eventName - The name of the event to stream
+         * @param {Object} options - Stream options
+         * @param {boolean} [options.autoAck=false] - Whether to auto-acknowledge records
+         * @param {Function} callback - Callback to handle streamed records
+         */
         async #streamRecords(eventName, options, callback = async () => {}) {
             try {
                 if (this.#engine.#internalAction.endSession) return;
@@ -188,6 +266,14 @@ class EnSyncEngine {
             }
         }
 
+        /**
+         * Pulls records for a given event
+         * @private
+         * @param {string} eventName - The name of the event to pull records for
+         * @param {Object} options - Pull options
+         * @param {boolean} [options.autoAck=true] - Whether to auto-acknowledge records
+         * @param {Function} callback - Callback to handle pulled records
+         */
         async #pullRecords(eventName, options, callback = async () => {}) {
             try {
                 if (this.#engine.#internalAction.endSession) return;
@@ -203,6 +289,13 @@ class EnSyncEngine {
             }
         }
 
+        /**
+         * Acknowledges a record
+         * @private
+         * @param {string} eventIdem - The event identifier
+         * @param {string} block - The block identifier
+         * @returns {Promise<string>} The acknowledgment response
+         */
         async #ack(eventIdem, block) {
             try {
                 const payload = `ACK;CLIENT_ID=${this.#engine.#config.clientId};EVENT_IDEM=${eventIdem};BLOCK=${block}`;
@@ -213,6 +306,12 @@ class EnSyncEngine {
             }
         }
 
+        /**
+         * Unsubscribes from an event
+         * @private
+         * @param {string} eventName - The name of the event to unsubscribe from
+         * @returns {Promise<string>} The unsubscribe response
+         */
         async #unsubscribe(eventName) {
             const resp = await this.#engine.#createRequest(
                 `UNSUB;CLIENT_ID=${this.#engine.#config.clientId};EVENT_NAME=${eventName}`
@@ -221,6 +320,14 @@ class EnSyncEngine {
             return resp;
         }
 
+        /**
+         * Publishes an event to the EnSync system
+         * @param {string} eventName - The name of the event to publish
+         * @param {Object} [payload={}] - The event payload
+         * @param {Object} [props={}] - Additional properties for the event
+         * @returns {Promise<string>} The publish response
+         * @throws {EnSyncError} If publishing fails or client is not created
+         */
         async publish(eventName, payload = {}, props = {}) {
             if (!this.#engine.#config.clientId)
                 throw new EnSyncError("Cannot publish an event when you haven't created a client");
@@ -233,6 +340,12 @@ class EnSyncEngine {
             }
         }
 
+        /**
+         * Subscribes to an event in the EnSync system
+         * @param {string} eventName - The name of the event to subscribe to
+         * @returns {Promise<Object>} An object containing pull, ack, stream, and unsubscribe methods
+         * @throws {EnSyncError} If subscription fails or client is not created
+         */
         async subscribe(eventName) {
             try {
                 if (!this.#engine.#config.clientId)
@@ -255,6 +368,9 @@ class EnSyncEngine {
             }
         }
 
+        /**
+         * Closes the client connection
+         */
         close() {
             this.#engine.close();
         }
