@@ -36,14 +36,14 @@ const powerSystem = async () => {
    // } catch (_) { console.log("some")}
 
    // Usage is starting to get too high
-   const tooHigh = await client.publish(powerUsageHighEventName, {"current.kWh":currentOutput, "dateTime": Date.now()})
-   await client.publish(powerUsageEventName, {"current.kWh": currentOutput, "dateTime": Date.now()})
+   const tooHigh = await client.publish(powerUsageHighEventName, {"current.kWh":Math.round(currentOutput), "dateTime": Date.now()})
+   await client.publish(powerUsageEventName, {"current.kWh": Math.round(currentOutput), "dateTime": Date.now()})
    console.log("tooHigh", tooHigh)
    client.close()
    break;
   }
   // Normal power usage
-  const normal = await client.publish(powerUsageEventName, {"current.kWh": currentOutput, "dateTime": Date.now()})
+  const normal = await client.publish(powerUsageEventName, {"current.kWh": Math.round(currentOutput), "dateTime": Date.now()})
   console.log("normal", normal)
  }
 }

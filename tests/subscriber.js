@@ -18,7 +18,7 @@ const response = async () => {
            // Acknowledge message read
            const ack = await client.ack(event.id, event.block)
            // Unsubscribe
-          //  await sub.unsubscribe(eventName)
+           await sub.unsubscribe()
            console.log("acknowledged", event.id, ack, "\n")
           } catch (e) {
            console.log("Exception", e)
