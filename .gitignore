@@ -9,6 +9,7 @@ lerna-debug.log*
 .git2
 .DS_Store
 ./tests/DS_Store
+.Sample.md
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 

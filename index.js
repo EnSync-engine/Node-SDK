@@ -67,17 +67,15 @@ const wait = (ms) => {
  * @typedef {Object} EnSyncEventPayload
  * @property {string} [id] - Event identifier
  * @property {string} [block] - Block identifier
- * @property {string} [type] - Event type
+ * @property {string} [name] - Event name
  * @property {Object} [data] - Event data
  * @property {number} [timestamp] - Event timestamp
- * @property {Object} [metadata] - Additional metadata
+ * @property {Object} [header] - Additional header
  */
 
 /**
  * @typedef {Object} EnSyncPublishOptions
  * @property {boolean} [persist=true] - Whether to persist the event
- * @property {number} [ttl] - Time to live in milliseconds
- * @property {string} [contentType] - Content type of the payload
  * @property {Object} [headers] - Additional headers
  */
 
@@ -441,27 +439,30 @@ class EnSyncEngine {
     /**
      * Publishes an event to the EnSync system
      * @param {string} eventName - The name of the event to publish
-     * @param {EnSyncEventPayload} [payload={}] - The event payload
-     * @param {EnSyncPublishOptions} [props={}] - Additional properties for the event
+     * @param {*} [payload={}] - The event payload (user-defined data structure)
+     * @param {EnSyncPublishOptions} [metadata={}] - Additional metadata for the event
      * @returns {Promise<EnSyncCommandResponse>} The publish response
      * @throws {EnSyncError} If publishing fails or client is not created
      * @fires EnSyncClient#publish
      * @example
      * ```javascript
      * const client = await engine.createClient('your-access-key');
+     * // Payload is user-defined
      * await client.publish('power-usage', {
-     *   data: { current: 100, unit: 'kWh' },
+     *   current: 100,
+     *   unit: 'kWh',
      *   timestamp: Date.now(),
-     *   metadata: { source: 'power-meter-1' }
+     *   source: 'power-meter-1'
      * });
      * ```
      */
-    async publish(eventName, payload = {}, props = {}) {
+
+    async publish(eventName, payload = {}, metadata = {persist: true, headers: {}}) {
       if (!this.#engine.#config.clientId)
         throw new EnSyncError("Cannot publish an event when you haven't created a client");
       try {
         return await this.#engine.#createRequest(
-          `PUB;CLIENT_ID=${this.#engine.#config.clientId};EVENT_NAME=${eventName};PAYLOAD=${JSON.stringify(payload)}`
+          `PUB;CLIENT_ID=${this.#engine.#config.clientId};EVENT_NAME=${eventName};PAYLOAD=${JSON.stringify(payload)};METADATA=${JSON.stringify(metadata)}`
         );
       } catch (e) {
         throw new EnSyncError(e, "EnSyncGenericError");
@@ -488,7 +489,7 @@ class EnSyncEngine {
     async subscribe(eventName) {
       try {
         if (!this.#engine.#config.clientId)
-          throw new EnSyncError("Cannot publish an event when you haven't created a client");
+          throw new EnSyncError("Cannot subscribe an event when you haven't created a client");
         if (!eventName?.trim() && typeof eventName !== "string")
           throw Error("EventName to subscribe to is not passed");
 
