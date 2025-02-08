@@ -4,6 +4,8 @@
   "description": "Client SDK for EnSync Engine",
   "main": "index.js",
   "scripts": {
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{js,jsx,ts,tsx,json,md}\""
   },
   "repository": {
     "type": "git",
@@ -14,5 +16,8 @@
   "license": "ISC",
   "dependencies": {
     "jsdoc": "^4.0.4"
+  },
+  "devDependencies": {
+    "prettier": "^3.2.5"
   }
 }

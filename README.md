@@ -10,21 +10,21 @@ See [Documentation on Our SDKs](https://docs.tryensync.com/sdk.html).
 
 ## How to Install
 
-``` javascript
+```javascript
 npm install ensync-client-sdk
 ```
 
 ## How to Use
 
-``` javascript
-import {EnSyncEngine, EnSyncError} from "ensync-client-sdk"
+```javascript
+import { EnSyncEngine, EnSyncError } from "ensync-client-sdk";
 ```
 
 ### More Docs
 
 To connect to an EnSync engine, use the command
 
-``` javascript
+```javascript
 new EnSyncEngine("<url_to_your_ensync>>", <props>)
 ```
 
@@ -34,7 +34,7 @@ Do note that you can connect using http or https. We recommend you use https as 
 
 To communicate with the engine, you would need to create a client (which generates a client Id) which would be used to initiate other actions on the engine's delivery system. To create a client use the below code
 
-``` javascript
+```javascript
 const client = await ensyncClient.createClient(<access_token>)
 ```
 
@@ -42,101 +42,98 @@ With you client now created, you can now start communication with the engine.
 
 #### To Publish a message
 
-``` javascript
+```javascript
 await client.publish(<event_name>, <payload>)
 ```
 
 #### To Subscribe to a message
 
-``` javascript
+```javascript
 const sub = await client.subscribe(<event_name>, {subscribeOnly: false})
 ```
 
 #### To Unsubscribe
 
-``` javascript
-sub.unsubscribe()
+```javascript
+sub.unsubscribe();
 ```
 
 #### To pull and acknowledge messages published to an event name use
 
-``` javascript
-sub.pull({autoAck: false}, async (event) => {
-    // You can acknowledge after each pull here, but if you prefer the client sdk to auto acknowledge, set autoAck to true
-    // Messing up with the block would lead to your message read not being acknowledged
-    await client.ack(event.id, event.block)
-})
+```javascript
+sub.pull({ autoAck: false }, async (event) => {
+  // You can acknowledge after each pull here, but if you prefer the client sdk to auto acknowledge, set autoAck to true
+  // Messing up with the block would lead to your message read not being acknowledged
+  await client.ack(event.id, event.block);
+});
 ```
 
 #### To Close connection, use
 
-``` javascript
-client.close()
+```javascript
+client.close();
 ```
 
 <br/>
 
 ### Code Sample for Event Producer
 
-``` javascript
-const {
-    EnSyncEngine
-} = require("ensync-client-sdk")
+```javascript
+const { EnSyncEngine } = require("ensync-client-sdk");
 
 const response = async () => {
-    try {
-        const eventName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL" // Event Created using the ensync-cli see ()
-        const ensyncClient = new EnSyncEngine("https://localhost:8443", {disableTls: true})
-        const client = await ensyncClient.createClient("xxxxxxxxxxxxxxxxxx")
+  try {
+    const eventName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL"; // Event Created using the ensync-cli see ()
+    const ensyncClient = new EnSyncEngine("https://localhost:8443", { disableTls: true });
+    const client = await ensyncClient.createClient("xxxxxxxxxxxxxxxxxx");
 
-        // Imitates microservice sending multiple events
-        for (let index = 0; index < 60000; index++) {
-            await client.publish(eventName, {name: "hi", responseType: index, transactionId: 1+index})
-            console.log("index", index)
-        }
-        client.close()
-
-    } catch(e) {
-        console.log("Error", e?.message)
+    // Imitates microservice sending multiple events
+    for (let index = 0; index < 60000; index++) {
+      await client.publish(eventName, {
+        name: "hi",
+        responseType: index,
+        transactionId: 1 + index,
+      });
+      console.log("index", index);
     }
-}
-response()
+    client.close();
+  } catch (e) {
+    console.log("Error", e?.message);
+  }
+};
+response();
 ```
 
 ### Code Sample for Event Subscriber
 
-``` javascript
-const {
-  EnSyncEngine
-} = require("ensync-client-sdk")
+```javascript
+const { EnSyncEngine } = require("ensync-client-sdk");
 
 const response = async () => {
-    try {
-        const eventName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL"
-        const ensyncClient = new EnSyncEngine("https://localhost:8443", {disableTls: true})
-        const client = await ensyncClient.createClient("xxxxxxxxx")
+  try {
+    const eventName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL";
+    const ensyncClient = new EnSyncEngine("https://localhost:8443", { disableTls: true });
+    const client = await ensyncClient.createClient("xxxxxxxxx");
 
-        // You have to subscribe to the event before you pullRecords else the system would not identify your client as subscribed to receive this event
-        const sub = await client.subscribe(eventName, {subscribeOnly: false})
+    // You have to subscribe to the event before you pullRecords else the system would not identify your client as subscribed to receive this event
+    const sub = await client.subscribe(eventName, { subscribeOnly: false });
 
-        sub.pull({autoAck: false},
-         async (event) => {
-          try {
-           console.log("event 1", event)
-           // Acknowledge message read
-           const ack = await sub.ack(event.id, event.block)
-           // Unsubscribe
-           await sub.unsubscribe(eventName)
-           console.log("acknowledged", event.id, ack, "\n")
-          } catch (e) {
-           console.log("Exception", e)
-          }
-        })
-
-    } catch(e) {
-        console.log("I got here")
-        console.log("e", e.message)
-    }
-}
-response()
+    sub.pull({ autoAck: false }, async (event) => {
+      try {
+        console.log("event 1", event);
+        // Acknowledge message read
+        const ack = await sub.ack(event.id, event.block);
+        // Unsubscribe
+        await sub.unsubscribe(eventName);
+        console.log("acknowledged", event.id, ack, "\n");
+      } catch (e) {
+        console.log("Exception", e);
+      }
+    });
+  } catch (e) {
+    console.log("I got here");
+    console.log("e", e.message);
+  }
+};
+response();
 ```
