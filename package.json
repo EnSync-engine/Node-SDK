@@ -1,6 +1,6 @@
 {
   "name": "ensync-client-sdk",
-  "version": "0.0.5",
+  "version": "0.0.11",
   "description": "Client SDK for EnSync Engine",
   "main": "index.js",
   "scripts": {
@@ -15,7 +15,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "jsdoc": "^4.0.4"
+    "ed2curve": "^0.3.0",
+    "jsdoc": "^4.0.4",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1"
   },
   "devDependencies": {
     "prettier": "^3.2.5"

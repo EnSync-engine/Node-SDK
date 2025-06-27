@@ -1,5 +1,7 @@
 const http2 = require("node:http2");
 const { EnSyncError, GENERIC_MESSAGE } = require("./error");
+const naclUtil = require('tweetnacl-util');
+const { encryptEd25519, decryptEd25519 } = require('./ecc-crypto');
 
 let RENEW_AT;
 
@@ -100,14 +102,15 @@ class EnSyncEngine {
    * @fires EnSyncEngine#connect - When connection is established
    * @fires EnSyncEngine#disconnect - When connection is closed
    */
-  constructor(ensyncURL, { version = "v1", disableTls = false, ignoreException = false, renewAt = 420000 }) {
+  constructor(ensyncURL, { version = "v1", useHttp1 = false, disableTls = false, ignoreException = false, renewAt = 320000 }) {
     RENEW_AT = renewAt;
     this.#config = {
       version: version,
       clientId: null,
+      clientHash: null,
       client: `/http/${version}/client`,
       accessKey: "",
-      isSecure: ensyncURL.startsWith("https"),
+      isSecure: !useHttp1 && ensyncURL.startsWith("https"),
       ensyncURL,
     };
 
@@ -147,7 +150,6 @@ class EnSyncEngine {
         : data.split(",");
     items.forEach((item, i) => {
       const [key, value] = item.split("=");
-
       convertedRecords[key.trim()] = value.trim();
     });
     return convertedRecords;
@@ -202,6 +204,7 @@ class EnSyncEngine {
           if (callback) await callback(chunk);
           resolved(data);
         } catch (err) {
+          console.log("err", err);
           rejected(new EnSyncError(err.message, "EnSyncGenericError"));
         }
       });
@@ -216,11 +219,12 @@ class EnSyncEngine {
    */
   async createClient(accessKey) {
     try {
-      const data = await this.#createRequest(`CONN;ACCESS_KEY=${accessKey}`);
+      const data = await this.#createRequest(`CONN;ACCESS_KEY=:${accessKey}`);
       const content = data.replace("+PASS:", "");
       const res = this.#convertKeyValueToObject(content);
       this.#config.clientId = res.clientId;
       this.#config.accessKey = accessKey;
+      this.#config.clientHash = res.clientHash;
 
       return new this.EnSyncClient(this);
     } catch (e) {
@@ -273,7 +277,7 @@ class EnSyncEngine {
     async #renewClient(clientId, accessKey) {
       try {
         if (this.#engine.#internalAction.endSession) return;
-        const payload = `RENEW;CLIENT_ID=${clientId};ACCESS_KEY=${accessKey}`;
+        const payload = `RENEW;CLIENT_ID=:${clientId};ACCESS_KEY=:${accessKey}`;
         const data = await this.#engine.#createRequest(payload);
 
         // Convert record to new clientId
@@ -309,9 +313,8 @@ class EnSyncEngine {
      */
     #convertKeyValueToObj(data) {
       return data
-        .replace(/(\w+)=/g, '"$1"=')
-        .replace(/=(\w+)/g, '="$1"')
-        .replaceAll("=", ": ");
+        .replace(/=(\w+)/g, ': $1')
+        .replace(/(\w+=*)/g, '"$1"')
     }
 
     /**
@@ -322,14 +325,20 @@ class EnSyncEngine {
      * @param {function(EnSyncRecord): Promise<void>} callback - Callback to handle the record
      * @throws {EnSyncError} If record handling fails
      */
-    async #handlePulledRecords(data, autoAck, callback) {
+    async #handlePulledRecords(data, decryptionKey, autoAck, callback) {
       if (data.startsWith("-FAIL:")) throw new EnSyncError(data, "EnSyncGenericError");
       if (data.startsWith("+RECORD:")) {
         const content = data.replace("+RECORD:", "");
+        console.log("content", this.#convertKeyValueToObj(content))
         const record = JSON.parse(this.#convertKeyValueToObj(content));
         if (record && record.constructor.name == "Object") {
           if (record) {
-            await callback(record);
+            const decodedPayloadJson = Buffer.from(record.payload, 'base64').toString('utf8');
+            const encryptedPayload = JSON.parse(decodedPayloadJson);
+            await callback({
+              ...record,
+              payload: JSON.parse(decryptEd25519(encryptedPayload, naclUtil.decodeBase64(decryptionKey)))
+            });
             if (autoAck) {
               await this.#ack(record.id, record.block);
             }
@@ -346,13 +355,13 @@ class EnSyncEngine {
      * @param {function(EnSyncRecord): Promise<void>} [callback] - Callback to handle streamed records
      * @throws {EnSyncError} If streaming fails
      */
-    async #streamRecords(eventName, options, callback = async () => {}) {
+    async #streamRecords(eventName, options, decryptionKey, callback = async () => {}) {
       try {
         if (this.#engine.#internalAction.endSession) return;
         const { autoAck = false } = options;
         this.#engine.#createRequest(
-          `STREAM;CLIENT_ID=${this.#engine.#config.clientId};EVENT_NAME=${eventName}`,
-          async (data) => await this.#handlePulledRecords(data, autoAck, callback)
+          `STREAM;CLIENT_ID=:${this.#engine.#config.clientId};EVENT_NAME=:${eventName}`,
+          async (data) => await this.#handlePulledRecords(data, decryptionKey, autoAck, callback)
         );
       } catch (e) {
         throw new EnSyncError(e?.message, "EnSyncGenericError");
@@ -367,17 +376,18 @@ class EnSyncEngine {
      * @param {function(EnSyncRecord): Promise<void>} [callback] - Callback to handle pulled records
      * @throws {EnSyncError} If pulling fails
      */
-    async #pullRecords(eventName, options, callback = async () => {}) {
+    async #pullRecords(eventName, options, decryptionKey, callback = async () => {}) {
       try {
         if (this.#engine.#internalAction.endSession) return;
         const { autoAck = true } = options;
         const data = await this.#engine.#createRequest(
-          `PULL;CLIENT_ID=${this.#engine.#config.clientId};EVENT_NAME=${eventName}`
+          `PULL;CLIENT_ID=:${this.#engine.#config.clientId};EVENT_NAME=:${eventName}`
         );
-        await this.#handlePulledRecords(data, autoAck, callback);
+        await this.#handlePulledRecords(data, decryptionKey, autoAck, callback);
         await wait(3);
-        await this.#pullRecords(eventName, options, callback);
+        await this.#pullRecords(eventName, options, decryptionKey, callback);
       } catch (e) {
+        console.log("e", e);
         throw new EnSyncError(e?.message, "EnSyncGenericError");
       }
     }
@@ -392,7 +402,7 @@ class EnSyncEngine {
      */
     async #ack(eventIdem, block) {
       try {
-        const payload = `ACK;CLIENT_ID=${this.#engine.#config.clientId};EVENT_IDEM=${eventIdem};BLOCK=${block}`;
+        const payload = `ACK;CLIENT_ID=:${this.#engine.#config.clientId};EVENT_IDEM=:${eventIdem};BLOCK=:${block}`;
         const data = await this.#engine.#createRequest(payload);
         return data;
       } catch (e) {
@@ -414,7 +424,7 @@ class EnSyncEngine {
     async #rollBack(eventIdem, block) {
       try {
         return await this.#engine.#createRequest(
-          `ROLLBACK;CLIENT_ID=${this.#engine.#config.clientId};EVENT_IDEM=${eventIdem};BLOCK=${block}`
+          `ROLLBACK;CLIENT_ID=:${this.#engine.#config.clientId};EVENT_IDEM=:${eventIdem};BLOCK=:${block}`
         );
       } catch (e) {
         throw new EnSyncError("Failed to trigger rollBack. " + GENERIC_MESSAGE, "EnSyncGenericError");
@@ -430,7 +440,7 @@ class EnSyncEngine {
      */
     async #unsubscribe(eventName) {
       const resp = await this.#engine.#createRequest(
-        `UNSUB;CLIENT_ID=${this.#engine.#config.clientId};EVENT_NAME=${eventName}`
+        `UNSUB;CLIENT_ID=:${this.#engine.#config.clientId};EVENT_NAME=:${eventName}`
       );
       this.#engine.#internalAction.stopPulling.push(eventName);
       return resp;
@@ -457,16 +467,19 @@ class EnSyncEngine {
      * ```
      */
 
-    async publish(eventName, payload = {}, metadata = {persist: true, headers: {}}) {
+    async publish(eventName, deliveryTo, payload = {}, metadata = {persist: true, headers: {}}) {
       if (!this.#engine.#config.clientId)
         throw new EnSyncError("Cannot publish an event when you haven't created a client");
       try {
+        const encrypted = encryptEd25519(JSON.stringify(payload), naclUtil.decodeBase64(deliveryTo));
+        // Convert the encrypted object to base64 (serialize to JSON first)
+        const encryptedBase64 = naclUtil.encodeBase64(Buffer.from(JSON.stringify(encrypted)));
         return await this.#engine.#createRequest(
-          `PUB;CLIENT_ID=${this.#engine.#config.clientId};EVENT_NAME=${eventName};PAYLOAD=${JSON.stringify(payload)};METADATA=${JSON.stringify(metadata)}`
+          `PUB;CLIENT_ID=:${this.#engine.#config.clientId};EVENT_NAME=:${eventName};PAYLOAD=:${encryptedBase64};DELIVERY_TO=:${deliveryTo};METADATA=:${JSON.stringify(metadata)}`
         );
       } catch (e) {
         throw new EnSyncError(e, "EnSyncGenericError");
-      }
+      } 
     }
 
     /**
@@ -486,7 +499,7 @@ class EnSyncEngine {
      * });
      * ```
      */
-    async subscribe(eventName) {
+    async subscribe(eventName, appSecretKey) {
       try {
         if (!this.#engine.#config.clientId)
           throw new EnSyncError("Cannot subscribe an event when you haven't created a client");
@@ -496,13 +509,14 @@ class EnSyncEngine {
         this.#removeFromStoppedPullingList(eventName);
 
         await this.#engine.#createRequest(
-          `SUB;CLIENT_ID=${this.#engine.#config.clientId};EVENT_NAME=${eventName}`
+          `SUB;CLIENT_ID=:${this.#engine.#config.clientId};EVENT_NAME=:${eventName}`
         );
+        
         return {
-          pull: (options, callback) => this.#pullRecords(eventName, options, callback),
+          pull: (options, callback) => this.#pullRecords(eventName, options, appSecretKey, callback),
           ack: (eventIdem, block) => this.#ack(eventIdem, block),
           rollback: (eventIdem, block) => this.#rollBack(eventIdem, block),
-          stream: (options, callback) => this.#streamRecords(eventName, options, callback),
+          stream: (options, callback) => this.#streamRecords(eventName, options, appSecretKey, callback),
           unsubscribe: async () => {
             return await this.#unsubscribe(eventName);
           },
@@ -521,7 +535,7 @@ class EnSyncEngine {
      * @fires EnSyncClient#destroy
      */
     async destroy(stopEngine = false) {
-      await this.#engine.#createRequest(`CLOSE;CLIENT_ID=${this.#engine.#config.clientId}`);
+      await this.#engine.#createRequest(`CLOSE;CLIENT_ID=:${this.#engine.#config.clientId}`);
       if (this.#renewTimeout) clearTimeout(this.#renewTimeout);
       if (stopEngine) this.#engine.close();
     }
