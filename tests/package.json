@@ -9,6 +9,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "ensync-client-sdk": "^0.0.4"
+    "dotenv": "^16.6.1",
+    "ensync-client-sdk": "^0.0.5"
   }
 }
