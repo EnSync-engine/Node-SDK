@@ -35,7 +35,7 @@ const response = async () => {
 
     // Publish test events
     const eventName = process.env.EVENT_TO_PUBLISH;
-    for (let index = 0; index < 1; index++) {
+    for (let index = 0; index < 1000; index++) {
       const start = Date.now();
       try {
         const response = await client.publish(eventName, [process.env.RECEIVER_IDENTIFICATION_NUMBER, "IGZg76L6zRw0I5lHGAlAqX+U/bf5TBqRJtKOCdcZcc4="], {
