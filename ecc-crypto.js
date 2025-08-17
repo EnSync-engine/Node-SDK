@@ -19,14 +19,18 @@ function ed25519SecretKeyToCurve25519(ed25519SecretKey) {
 /**
  * Encrypts a message using the recipient's Ed25519 public key
  * @param {string} message - UTF-8 string to encrypt
- * @param {Uint8Array} recipientEd25519PublicKey - 32-byte Ed25519 public key
+ * @param {string|Uint8Array} recipientEd25519PublicKey - 32-byte Ed25519 public key (base64 string or Uint8Array)
  * @returns {object} { nonce, ciphertext, ephemeralPublicKey } (all base64)
  */
 function encryptEd25519(message, recipientEd25519PublicKey) {
+  // Convert base64 key to Uint8Array if needed
+  const publicKeyBytes = typeof recipientEd25519PublicKey === 'string' 
+    ? naclUtil.decodeBase64(recipientEd25519PublicKey)
+    : recipientEd25519PublicKey;
   // Generate ephemeral key pair for sender
   const ephemeralKeyPair = nacl.box.keyPair();
   // Convert recipient Ed25519 public key to X25519
-  const recipientCurve25519PublicKey = ed25519PublicKeyToCurve25519(recipientEd25519PublicKey);
+  const recipientCurve25519PublicKey = ed25519PublicKeyToCurve25519(publicKeyBytes);
   // Generate random nonce
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
   // Encrypt
@@ -46,15 +50,20 @@ function encryptEd25519(message, recipientEd25519PublicKey) {
 /**
  * Decrypts a message using the recipient's Ed25519 private key
  * @param {object} encrypted - { nonce, ciphertext, ephemeralPublicKey } (all base64)
- * @param {Uint8Array} recipientEd25519SecretKey - 64-byte Ed25519 secret key
+ * @param {string|Uint8Array} recipientEd25519SecretKey - 64-byte Ed25519 secret key (base64 string or Uint8Array)
  * @returns {string} decrypted message (UTF-8)
  */
 function decryptEd25519(encrypted, recipientEd25519SecretKey) {
+  // Convert base64 key to Uint8Array if needed
+  const secretKeyBytes = typeof recipientEd25519SecretKey === 'string'
+    ? naclUtil.decodeBase64(recipientEd25519SecretKey)
+    : recipientEd25519SecretKey;
   const nonce = naclUtil.decodeBase64(encrypted.nonce);
   const ciphertext = naclUtil.decodeBase64(encrypted.ciphertext);
   const ephemeralPublicKey = naclUtil.decodeBase64(encrypted.ephemeralPublicKey);
   // Convert recipient Ed25519 secret key to X25519
-  const recipientCurve25519SecretKey = ed25519SecretKeyToCurve25519(recipientEd25519SecretKey);
+  const recipientCurve25519SecretKey = ed25519SecretKeyToCurve25519(secretKeyBytes);
+
   // Decrypt
   const plaintext = nacl.box.open(
     ciphertext,

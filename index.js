@@ -3,6 +3,7 @@ const { EnSyncError, GENERIC_MESSAGE } = require("./error");
 const naclUtil = require('tweetnacl-util');
 const { encryptEd25519, decryptEd25519 } = require('./ecc-crypto');
 
+const SERVICE_NAME = 'EnSync';
 let RENEW_AT;
 
 const wait = (ms) => {
@@ -122,10 +123,7 @@ class EnSyncEngine {
 
     if (this.#config.isSecure) {
       if (disableTls) process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0";
-      this.#client = http2.connect(ensyncURL);
-      this.#client.on("error", (err) => {
-        this.#client = http2.connect(ensyncURL);
-      });
+      this.#connectWithRetry(ensyncURL);
     }
   }
 
@@ -165,30 +163,80 @@ class EnSyncEngine {
    * @emits EnSyncEngine#request
    * @emits EnSyncEngine#response
    */
+  /**
+   * Establishes HTTP/2 connection with retry logic
+   * @private
+   * @param {string} url - The URL to connect to
+   */
+  #connectWithRetry(url) {
+    try {
+      this.#client = http2.connect(url);
+      this.#client.on("error", (err) => {
+        console.log(`${SERVICE_NAME}: Connection error:`, err);
+        if (!this.#internalAction.endSession) {
+          setTimeout(() => this.#connectWithRetry(url), 1000); // Retry after 1 second
+        }
+      });
+
+      this.#client.on("close", () => {
+        if (!this.#internalAction.endSession) {
+          setTimeout(() => this.#connectWithRetry(url), 1000); // Retry after 1 second
+        }
+      });
+    } catch (err) {
+      console.log(`${SERVICE_NAME}: Failed to establish connection:`, err);
+      if (!this.#internalAction.endSession) {
+        setTimeout(() => this.#connectWithRetry(url), 1000); // Retry after 1 second
+      }
+    }
+  }
+
   async #createRequest(command, callback) {
     let data = "";
     if (this.#config.isSecure) {
       return new Promise((resolved, rejected) => {
-        const req = this.#client.request({
-          ":path": `/http/${this.#config.version}/client`,
-          ":method": "POST",
-        });
+        const makeRequest = () => {
+          try {
+            const req = this.#client.request({
+              ":path": `/http/${this.#config.version}/client`,
+              ":method": "POST",
+            });
 
-        req.setEncoding("utf8");
-        req.write(command);
+            req.setEncoding("utf8");
+            req.write(command);
 
-        req.on("error", rejected).on("response", () => {});
+            req.on("error", (err) => {
+              if (err.code === 'ERR_HTTP2_STREAM_CANCEL') {
+                // Retry the request after a short delay
+                setTimeout(() => makeRequest(), 100);
+              } else {
+                rejected(err);
+              }
+            });
 
-        req
-          .on("data", async (chunk) => {
-            data += chunk;
-            if (callback) await callback(chunk);
-          })
-          .on("end", () => {
-            if (data.startsWith("-FAIL:")) throw new EnSyncError(data, "EnSyncGenericError");
-            resolved(data);
-          });
-        req.end();
+            req.on("response", () => {});
+
+            req
+              .on("data", async (chunk) => {
+                data += chunk;
+                if (callback) await callback(chunk);
+              })
+              .on("end", () => {
+                if (data.startsWith("-FAIL:")) throw new EnSyncError(data, "EnSyncGenericError");
+                resolved(data);
+              });
+            req.end();
+          } catch (err) {
+            if (err.code === 'ERR_HTTP2_STREAM_CANCEL') {
+              // Retry the request after a short delay
+              setTimeout(() => makeRequest(), 100);
+            } else {
+              rejected(err);
+            }
+          }
+        };
+
+        makeRequest();
       });
     } else {
       return new Promise(async (resolved, rejected) => {
@@ -204,7 +252,7 @@ class EnSyncEngine {
           if (callback) await callback(chunk);
           resolved(data);
         } catch (err) {
-          console.log("err", err);
+          console.log(`${SERVICE_NAME}: err`, err);
           rejected(new EnSyncError(err.message, "EnSyncGenericError"));
         }
       });
@@ -228,6 +276,7 @@ class EnSyncEngine {
 
       return new this.EnSyncClient(this);
     } catch (e) {
+      console.log("\ne---", e);
       throw new EnSyncError(e, "EnSyncConnectionError");
     }
   }
@@ -329,7 +378,6 @@ class EnSyncEngine {
       if (data.startsWith("-FAIL:")) throw new EnSyncError(data, "EnSyncGenericError");
       if (data.startsWith("+RECORD:")) {
         const content = data.replace("+RECORD:", "");
-        console.log("content", this.#convertKeyValueToObj(content))
         const record = JSON.parse(this.#convertKeyValueToObj(content));
         if (record && record.constructor.name == "Object") {
           if (record) {
@@ -387,7 +435,6 @@ class EnSyncEngine {
         await wait(3);
         await this.#pullRecords(eventName, options, decryptionKey, callback);
       } catch (e) {
-        console.log("e", e);
         throw new EnSyncError(e?.message, "EnSyncGenericError");
       }
     }
@@ -467,16 +514,30 @@ class EnSyncEngine {
      * ```
      */
 
-    async publish(eventName, deliveryTo, payload = {}, metadata = {persist: true, headers: {}}) {
+    async publish(eventName, recipients, payload = {}, metadata = {persist: true, headers: {}}) {
       if (!this.#engine.#config.clientId)
         throw new EnSyncError("Cannot publish an event when you haven't created a client");
+
+      if (!Array.isArray(recipients)) {
+        throw new EnSyncError("recipients must be an array", "EnSyncAuthError");
+      }
+
+      if (recipients.length === 0) {
+        throw new EnSyncError("recipients array cannot be empty", "EnSyncAuthError");
+      }
+
       try {
-        const encrypted = encryptEd25519(JSON.stringify(payload), naclUtil.decodeBase64(deliveryTo));
-        // Convert the encrypted object to base64 (serialize to JSON first)
-        const encryptedBase64 = naclUtil.encodeBase64(Buffer.from(JSON.stringify(encrypted)));
-        return await this.#engine.#createRequest(
-          `PUB;CLIENT_ID=:${this.#engine.#config.clientId};EVENT_NAME=:${eventName};PAYLOAD=:${encryptedBase64};DELIVERY_TO=:${deliveryTo};METADATA=:${JSON.stringify(metadata)}`
-        );
+        const responses = [];
+        // Encrypt and send for each recipient individually
+        for (const recipient of recipients) {
+          const encrypted = encryptEd25519(JSON.stringify(payload), naclUtil.decodeBase64(recipient));
+          const encryptedBase64 = naclUtil.encodeBase64(Buffer.from(JSON.stringify(encrypted)));
+          const response = await this.#engine.#createRequest(
+            `PUB;CLIENT_ID=:${this.#engine.#config.clientId};EVENT_NAME=:${eventName};PAYLOAD=:${encryptedBase64};DELIVERY_TO=:${recipient};METADATA=:${JSON.stringify(metadata)}`
+          );
+          responses.push(response);
+        }
+        return responses.join(',');
       } catch (e) {
         throw new EnSyncError(e, "EnSyncGenericError");
       } 
@@ -511,7 +572,7 @@ class EnSyncEngine {
         await this.#engine.#createRequest(
           `SUB;CLIENT_ID=:${this.#engine.#config.clientId};EVENT_NAME=:${eventName}`
         );
-        
+
         return {
           pull: (options, callback) => this.#pullRecords(eventName, options, appSecretKey, callback),
           ack: (eventIdem, block) => this.#ack(eventIdem, block),
