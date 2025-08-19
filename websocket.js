@@ -199,7 +199,7 @@ class EnSyncWebSocketClient {
      * @returns {Promise<void>}
      * @throws {EnSyncError} If subscription fails
      */
-    async subscribe(eventName, options = {autoAck: true}) {
+    async subscribe(eventName, options = {autoAck: false, appSecretKey: null}) {
         if (!this.#state.isAuthenticated) {
             throw new EnSyncError("Not authenticated", "EnSyncAuthError");
         }
@@ -213,7 +213,9 @@ class EnSyncWebSocketClient {
             }
             console.log(`${SERVICE_NAME} Successfully subscribed to ${eventName}`);
             return {
-                on: (handler) => this.#on(eventName, handler, options.appSecretKey),
+                on: (handler) => this.#on(eventName, handler, options.appSecretKey, options.autoAck),
+                ack: (eventIdem, block) => this.#ack(eventIdem, block),
+                rollback: (eventIdem, block) => this.#rollback(eventIdem, block),
                 unsubscribe: async () => this.#unsubscribe(eventName)
             }
         } else {
@@ -228,11 +230,11 @@ class EnSyncWebSocketClient {
      * @param {string} appSecretKey - App secret key for authentication
      * @returns {Function} Unsubscribe function
      */
-    #on(eventName, handler, appSecretKey) {
+    #on(eventName, handler, appSecretKey, autoAck = false) {
         if (!this.#subscriptions.has(eventName)) {
             this.#subscriptions.set(eventName, new Set());
         }
-        const wrappedHandler = { handler, appSecretKey };
+        const wrappedHandler = { handler, appSecretKey, autoAck };
         this.#subscriptions.get(eventName).add(wrappedHandler);
 
         return () => {
@@ -297,7 +299,7 @@ class EnSyncWebSocketClient {
 
                 return {
                     eventName: record.name,
-                    id: record.id,
+                    idem: record.id,
                     block: record.block,
                     timestamp: record.loggedAt,
                     payload: record.payload,
@@ -394,7 +396,7 @@ class EnSyncWebSocketClient {
             const eventData = this.#parseEventMessage(message);
             if (eventData && this.#subscriptions.has(eventData.eventName)) {
                 const handlers = this.#subscriptions.get(eventData.eventName);
-                handlers.forEach(({ handler, appSecretKey }) => {
+                handlers.forEach(({ handler, appSecretKey, autoAck }) => {
                     try {
                         // Use subscription key if available, otherwise fall back to client key
                         const decryptionKey = appSecretKey || this.#config.appSecretKey || this.#config.clientHash;
@@ -408,6 +410,13 @@ class EnSyncWebSocketClient {
                         // Remove encryptedPayload from eventData
                         delete eventData.encryptedPayload;
                         handler({ ...eventData, payload: finalPayload });
+                        
+                        // Auto-acknowledge if enabled
+                        if (autoAck && eventData.idem && eventData.block) {
+                            this.#ack(eventData.idem, eventData.block).catch(err => {
+                                console.error(`${SERVICE_NAME} Auto-acknowledge error:`, err);
+                            });
+                        }
                     } catch (e) {
                         console.error(`${SERVICE_NAME} Event handler error -`, e);
                     }
@@ -493,6 +502,54 @@ class EnSyncWebSocketClient {
      * Clears all timers
      * @private
      */
+    /**
+     * Acknowledges a record
+     * @param {string} eventIdem - The event identifier
+     * @param {string} block - The block identifier
+     * @returns {Promise<string>} The acknowledgment response
+     * @throws {EnSyncError} If acknowledgment fails
+     */
+    async #ack(eventIdem, block) {
+        if (!this.#state.isAuthenticated) {
+            throw new EnSyncError("Not authenticated", "EnSyncAuthError");
+        }
+        
+        try {
+            const payload = `ACK;CLIENT_ID=:${this.#config.clientId};EVENT_IDEM=:${eventIdem};BLOCK=:${block}`;
+            const data = await this.#sendMessage(payload);
+            return data;
+        } catch (e) {
+            throw new EnSyncError(
+                "Failed to acknowledge event. " + GENERIC_MESSAGE,
+                "EnSyncGenericError"
+            );
+        }
+    }
+
+    /**
+     * Rolls back a record
+     * @param {string} eventIdem - The event identifier
+     * @param {string} block - The block identifier
+     * @returns {Promise<string>} The rollback response
+     * @throws {EnSyncError} If rollback fails
+     */
+    async #rollback(eventIdem, block) {
+        if (!this.#state.isAuthenticated) {
+            throw new EnSyncError("Not authenticated", "EnSyncAuthError");
+        }
+        
+        try {
+            const payload = `ROLLBACK;CLIENT_ID=:${this.#config.clientId};EVENT_IDEM=:${eventIdem};BLOCK=:${block}`;
+            const data = await this.#sendMessage(payload);
+            return data;
+        } catch (e) {
+            throw new EnSyncError(
+                "Failed to trigger rollback. " + GENERIC_MESSAGE,
+                "EnSyncGenericError"
+            );
+        }
+    }
+
     #clearTimers() {
         if (this.#state.pingTimeout) {
             clearInterval(this.#state.pingTimeout);
@@ -529,4 +586,4 @@ class EnSyncWebSocketClient {
     // }
 }
 
-module.exports = { EnSyncWebSocketClient };
+module.exports = { EnSyncWebSocketClient, EnSyncError };

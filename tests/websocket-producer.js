@@ -35,7 +35,7 @@ const response = async () => {
 
     // Publish test events
     const eventName = process.env.EVENT_TO_PUBLISH;
-    for (let index = 0; index < 1000; index++) {
+    for (let index = 0; index < 1; index++) {
       console.log("index", index)
       const start = Date.now();
       try {

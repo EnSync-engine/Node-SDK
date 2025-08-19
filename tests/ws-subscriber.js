@@ -8,11 +8,24 @@ const response = async () => {
     await ensyncClient.createClient(process.env.CLIENT_ACCESS_KEY, { appSecretKey: process.env.APP_SECRET_KEY });
 
     // Subscribe to the event and set up the handler
-    const subscription = await ensyncClient.subscribe(eventName);
+    // Setting autoAck to false to manually acknowledge events
+    const subscription = await ensyncClient.subscribe(eventName, { autoAck: false, appSecretKey: process.env.APP_SECRET_KEY });
     subscription.on(async (event) => {
       try {
         console.log("\nEvent received:", event);
-        console.log("Acknowledged\n");
+        
+        // Manually acknowledge the event
+        console.log("event", event)
+        if (event.idem && event.block) {
+          try {
+            await subscription.ack(event.idem, event.block);
+            console.log(`Event ${event.idem} successfully acknowledged\n`);
+          } catch (ackError) {
+            console.error(`Failed to acknowledge event ${event.idem}:`, ackError);
+          }
+        } else {
+          console.warn("Cannot acknowledge event: missing idem or block");
+        }
       } catch (e) {
         console.log("Exception:", e);
       }
