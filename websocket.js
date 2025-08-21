@@ -3,9 +3,9 @@ const { EnSyncError, GENERIC_MESSAGE } = require("./error");
 const naclUtil = require('tweetnacl-util');
 const { encryptEd25519, decryptEd25519 } = require('./ecc-crypto');
 
-const SERVICE_NAME = 'EnSync:'
+const SERVICE_NAME = 'EnSync:';
 
-class EnSyncWebSocketClient {
+class EnSyncEngine {
     /** @type {WebSocket} */
     #ws = null;
 
@@ -30,7 +30,8 @@ class EnSyncWebSocketClient {
         isAuthenticated: false,
         reconnectAttempts: 0,
         pingTimeout: null,
-        reconnectTimeout: null
+        reconnectTimeout: null,
+        shouldReconnect: true
     };
 
     /** @type {Object.<string, Set<Function>>} */
@@ -66,7 +67,7 @@ class EnSyncWebSocketClient {
     /**
      * Creates a new WebSocket client
      * @param {string} accessKey - The access key for authentication
-     * @returns {Promise<EnSyncWebSocketClient>} A new EnSync WebSocket client instance
+     * @returns {Promise<EnSyncEngine>} A new EnSync WebSocket client instance
      * @throws {EnSyncError} If client creation fails
      */
     async createClient(accessKey, options = {}) {
@@ -90,16 +91,16 @@ class EnSyncWebSocketClient {
           convertedRecords[key.trim()] = value.trim();
         });
         return convertedRecords;
-      }
+    }
     
-      #convertKeyValueToObj(data) {
+    #convertKeyValueToObj(data) {
         // const result = data
         //   .replace(/(\w+)=/g, '"$1"=')
         //   .replace(/=(\w+)/g, '="$1"')
         //   .replaceAll("=", ": ");
-        console.log("data", data)
+        console.log("data", data);
         return data;
-      }
+    }
 
     /**
      * Connects to the EnSync WebSocket server and authenticates
@@ -131,7 +132,7 @@ class EnSyncWebSocketClient {
 
                 this.#ws.on('close', (code, reason) => {
                     console.log(`${SERVICE_NAME} WebSocket closed with code ${code}${reason ? ': ' + reason : ''}`);
-                    this.#handleClose();
+                    this.#handleClose(code, reason);
                 });
 
                 this.#ws.on('pong', () => {
@@ -184,15 +185,11 @@ class EnSyncWebSocketClient {
             
             return responses.join(',');
         } catch (error) {
-            console.log("Decrypt Error", error)
+            console.log("Decrypt Error", error);
             throw new EnSyncError(error, "EnSyncPublishError");
         }
     }
 
-    /**
-     * Closes the WebSocket connection
-     * @returns {Promise<void>}
-     */
     /**
      * Subscribes to an event
      * @param {string} eventName - Name of the event to subscribe to
@@ -217,7 +214,7 @@ class EnSyncWebSocketClient {
                 ack: (eventIdem, block) => this.#ack(eventIdem, block),
                 rollback: (eventIdem, block) => this.#rollback(eventIdem, block),
                 unsubscribe: async () => this.#unsubscribe(eventName)
-            }
+            };
         } else {
             throw new EnSyncError(`Subscription failed: ${response}`, "EnSyncSubscriptionError");
         }
@@ -314,7 +311,12 @@ class EnSyncWebSocketClient {
         }
     }
 
+    /**
+     * Closes the WebSocket connection
+     * @returns {Promise<void>}
+     */
     async close() {
+        this.#state.shouldReconnect = false;
         return new Promise((resolve) => {
             this.#clearTimers();
             if (this.#ws) {
@@ -350,6 +352,7 @@ class EnSyncWebSocketClient {
             for (const eventName of currentSubscriptions) {
                 await this.subscribe(eventName).catch(console.error);
             }
+            return response;
         } else {
             throw new EnSyncError("Authentication failed: " + response, "EnSyncAuthError");
         }
@@ -365,14 +368,16 @@ class EnSyncWebSocketClient {
             
             const timeout = setTimeout(() => {
                 this.#messageCallbacks.delete(messageId);
+                console.log(`${SERVICE_NAME} Message timeout for request: ${message.substring(0, 30)}...`);
                 reject(new EnSyncError("Message timeout", "EnSyncTimeoutError"));
-            }, 10000);
+            }, 30000); // Increased timeout to 30 seconds
 
             this.#messageCallbacks.set(messageId, { resolve, reject, timeout });
             
-            if (this.#ws.readyState === WebSocket.OPEN) {
+            if (this.#ws && this.#ws.readyState === WebSocket.OPEN) {
                 this.#ws.send(message);
             } else {
+                clearTimeout(timeout);
                 reject(new EnSyncError("WebSocket not connected", "EnSyncConnectionError"));
             }
         });
@@ -452,28 +457,44 @@ class EnSyncWebSocketClient {
     #handleError(error) {
         this.#eventHandlers.error.forEach(handler => handler(error));
     }
-
+    
     /**
-     * Handles WebSocket close
+     * Handles WebSocket close events
      * @private
+     * @param {number} code - Close code
+     * @param {string} reason - Close reason
      */
-    #handleClose() {
+    #handleClose(code, reason) {
         this.#state.isConnected = false;
         this.#state.isAuthenticated = false;
         this.#clearTimers();
 
-        // Save current subscriptions for resubscription after reconnect
-        const currentSubscriptions = Array.from(this.#subscriptions.keys());
+        console.log(`${SERVICE_NAME} WebSocket closed with code ${code || 'unknown'}, reason: ${reason || 'none provided'}`);
+        
+        // Clear any pending message callbacks to prevent memory leaks
+        this.#messageCallbacks.forEach((callback) => {
+            clearTimeout(callback.timeout);
+            callback.reject(new EnSyncError('Connection closed', 'EnSyncConnectionError'));
+        });
+        this.#messageCallbacks.clear();
 
-        // Attempt reconnection if not explicitly closed
-        if (this.#state.reconnectAttempts < this.#config.maxReconnectAttempts) {
-            this.#state.reconnectAttempts++;
-            this.#state.reconnectTimeout = setTimeout(() => {
-                this.connect().catch(() => {});
-            }, this.#config.reconnectInterval);
-        }
-
+        // Notify close handlers
         this.#eventHandlers.close.forEach(handler => handler());
+        
+        // Attempt reconnection if needed
+        if (this.#state.shouldReconnect && this.#state.reconnectAttempts < this.#config.maxReconnectAttempts) {
+            this.#state.reconnectAttempts++;
+            const delay = this.#config.reconnectInterval * Math.pow(1.5, this.#state.reconnectAttempts - 1);
+            console.log(`${SERVICE_NAME} Attempting reconnect ${this.#state.reconnectAttempts}/${this.#config.maxReconnectAttempts} in ${delay}ms...`);
+            
+            this.#state.reconnectTimeout = setTimeout(() => {
+                this.connect().catch(error => {
+                    console.error(`${SERVICE_NAME} Reconnection attempt failed:`, error);
+                });
+            }, delay);
+        } else if (this.#state.reconnectAttempts >= this.#config.maxReconnectAttempts) {
+            console.error(`${SERVICE_NAME} Maximum reconnection attempts (${this.#config.maxReconnectAttempts}) reached. Giving up.`);
+        }
     }
 
     /**
@@ -483,7 +504,7 @@ class EnSyncWebSocketClient {
     #startPingInterval() {
         this.#clearTimers();
         this.#state.pingTimeout = setInterval(() => {
-            if (this.#ws.readyState === WebSocket.OPEN) {
+            if (this.#ws && this.#ws.readyState === WebSocket.OPEN) {
                 this.#ws.ping();
             }
         }, this.#config.pingInterval);
@@ -502,6 +523,17 @@ class EnSyncWebSocketClient {
      * Clears all timers
      * @private
      */
+    #clearTimers() {
+        if (this.#state.pingTimeout) {
+            clearInterval(this.#state.pingTimeout);
+            this.#state.pingTimeout = null;
+        }
+        if (this.#state.reconnectTimeout) {
+            clearTimeout(this.#state.reconnectTimeout);
+            this.#state.reconnectTimeout = null;
+        }
+    }
+
     /**
      * Acknowledges a record
      * @param {string} eventIdem - The event identifier
@@ -519,6 +551,7 @@ class EnSyncWebSocketClient {
             const data = await this.#sendMessage(payload);
             return data;
         } catch (e) {
+            console.log("ACK Error", e);
             throw new EnSyncError(
                 "Failed to acknowledge event. " + GENERIC_MESSAGE,
                 "EnSyncGenericError"
@@ -550,40 +583,27 @@ class EnSyncWebSocketClient {
         }
     }
 
-    #clearTimers() {
-        if (this.#state.pingTimeout) {
-            clearInterval(this.#state.pingTimeout);
-            this.#state.pingTimeout = null;
-        }
-        if (this.#state.reconnectTimeout) {
-            clearTimeout(this.#state.reconnectTimeout);
-            this.#state.reconnectTimeout = null;
-        }
-    }
-
-    // Event handling methods
-
     /**
      * Adds an event listener
      * @param {string} event - Event name ('message', 'error', 'reconnect', 'close')
      * @param {Function} handler - Event handler
      */
-    // on(event, handler) {
-    //     if (this.#eventHandlers[event]) {
-    //         this.#eventHandlers[event].add(handler);
-    //     }
-    // }
+    on(event, handler) {
+        if (this.#eventHandlers[event]) {
+            this.#eventHandlers[event].add(handler);
+        }
+    }
 
     /**
      * Removes an event listener
      * @param {string} event - Event name
      * @param {Function} handler - Event handler to remove
      */
-    // off(event, handler) {
-    //     if (this.#eventHandlers[event]) {
-    //         this.#eventHandlers[event].delete(handler);
-    //     }
-    // }
+    off(event, handler) {
+        if (this.#eventHandlers[event]) {
+            this.#eventHandlers[event].delete(handler);
+        }
+    }
 }
 
-module.exports = { EnSyncWebSocketClient, EnSyncError };
+module.exports = { EnSyncEngine, EnSyncError };
