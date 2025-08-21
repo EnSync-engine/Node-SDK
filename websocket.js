@@ -185,7 +185,6 @@ class EnSyncEngine {
             
             return responses.join(',');
         } catch (error) {
-            console.log("Decrypt Error", error);
             throw new EnSyncError(error, "EnSyncPublishError");
         }
     }
