@@ -1,3 +1,8 @@
 tests
 http1.js
 .Sample.md
+node_modules
+.DS_Store
+.git2
+.vscode
+.Doc.md
