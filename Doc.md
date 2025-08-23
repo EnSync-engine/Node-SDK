@@ -1,25 +1,15 @@
-# EnSync Client SDK Documentation
+# Node SDK
 
-## Table of Contents
-- [Introduction](#introduction)
-- [Installation](#installation)
-- [Core Concepts](#core-concepts)
-- [Getting Started](#getting-started)
-- [API Reference](#api-reference)
-  - [EnSyncEngine](#ensyncengine)
-  - [Subscription](#subscription)
-  - [Publishing](#publishing)
-- [Error Handling](#error-handling)
-- [Examples](#examples)
-- [Best Practices](#best-practices)
+---
 
-## Introduction
+## Full Documentation
 
-EnSync Client SDK is a powerful library for real-time event-based communication with the EnSync Engine. It provides a seamless way to integrate with third-party applications as though they were native to your system, all in real-time.
+This is the client SDK for EnSync engine (event-delivery based integration engine) that enables you to integrate with third-party apps as though they were native to your system and in realtime.
 
-The SDK supports two transport protocols:
-- **WebSocket** (default): For real-time bidirectional communication
-- **HTTP/2**: For environments where WebSockets aren't available
+See [Documentation on EnSync Engine](https://docs.tryensync.com/introduction.html).  
+See [Documentation on Our SDKs](https://docs.tryensync.com/sdk.html).
+
+---
 
 ## Installation
 
@@ -27,229 +17,262 @@ The SDK supports two transport protocols:
 npm install ensync-client-sdk
 ```
 
-### Import Options
+---
+
+## Usage
+
+### Importing
 
 ```javascript
-// Default import (WebSocket implementation)
-const { EnSyncEngine } = require('ensync-client-sdk');
+// CommonJS
+const { EnSyncEngine } = require("ensync-client-sdk");
 
-// HTTP implementation
-const { EnSyncEngine } = require('ensync-client-sdk/http');
+// ES Modules
+import { EnSyncEngine } from "ensync-client-sdk";
 ```
 
-## Core Concepts
-
-EnSync operates on a publish-subscribe pattern with these key concepts:
-
-- **Engine**: The main connection manager that handles authentication and client creation
-- **Client**: Handles event publishing and subscription
-- **Events**: Named channels for message exchange
-- **Subscription**: A connection to an event stream that receives messages
-- **Publishing**: Sending messages to specific recipients through events
-
-## Getting Started
-
-### Creating a Client
-
-```javascript
-const { EnSyncEngine } = require('ensync-client-sdk');
-
-async function connect() {
-  // Create engine with WebSocket connection
-  const engine = new EnSyncEngine("ws://your-ensync-server:8082", {
-    pingInterval: 15000,  // 15 seconds
-    reconnectInterval: 3000,  // 3 seconds
-    maxReconnectAttempts: 3
-  });
-  
-  // Create and authenticate client
-  const client = await engine.createClient("YOUR_ACCESS_KEY");
-  console.log("Successfully connected to EnSync");
-  
-  return client;
-}
-```
-
-### Publishing Events
-
-```javascript
-async function publishEvent(client) {
-  // Publish to specific recipients
-  await client.publish(
-    "your/event/name",  // Event name
-    ["RECIPIENT_ID"],   // Array of recipient IDs
-    {                   // Payload (any JSON-serializable object)
-      temperature: 22.5,
-      humidity: 45,
-      timestamp: Date.now()
-    }
-  );
-}
-```
-
-### Subscribing to Events
-
-```javascript
-async function subscribeToEvents(client) {
-  // Subscribe to an event
-  const subscription = await client.subscribe(
-    "your/event/name",
-    { appSecretKey: "YOUR_APP_SECRET_KEY" }
-  );
-  
-  // Handle incoming events
-  subscription.on(async (event) => {
-    console.log("Received event:", event);
-    
-    // Acknowledge receipt (if autoAck is false)
-    if (event.idem && event.block) {
-      await subscription.ack(event.idem, event.block);
-    }
-  });
-}
-```
+---
 
 ## API Reference
 
 ### EnSyncEngine
 
-#### Constructor
+The main class that manages connections and client creation for the EnSync system.
 
 ```javascript
-new EnSyncEngine(url, options)
+const engine = new EnSyncEngine(url, options);
 ```
 
-- **url**: `string` - WebSocket URL of the EnSync server
-- **options**: `Object`
-  - **pingInterval**: `number` - Interval in ms for ping messages (default: 30000)
-  - **reconnectInterval**: `number` - Interval in ms for reconnection attempts (default: 5000)
-  - **maxReconnectAttempts**: `number` - Maximum reconnection attempts (default: 5)
-  - **disableTls**: `boolean` - Whether to disable TLS verification (default: false)
+#### Parameters
 
-#### Methods
+- `url` (string): The URL of the EnSync server
+- `options` (object, optional):
+  - `disableTls` (boolean): Set to true to disable TLS (default: false)
+  - `reconnectInterval` (number): Reconnection interval in ms (default: 5000)
+  - `maxReconnectAttempts` (number): Maximum reconnection attempts (default: 10)
 
-##### createClient(accessKey, options)
+#### Events
 
-Creates and authenticates a new client.
+- `error`: Emitted when an error occurs
+- `connect`: Emitted when connection is established
+- `disconnect`: Emitted when connection is closed
 
-- **accessKey**: `string` - Access key for authentication
-- **options**: `Object`
-  - **appSecretKey**: `string` - Optional app secret key
-- **Returns**: `Promise<EnSyncEngine>` - The authenticated client
+---
 
-##### close()
+### Creating a Client
 
-Closes the WebSocket connection and cleans up resources.
+- Initialize the engine with your server URL
+- Create a client with your access key
 
-### Subscription
+```javascript
+const engine = new EnSyncEngine("https://node.ensync.cloud");
+const client = await engine.createClient("your-access-key");
+```
 
-When you subscribe to an event, you receive a subscription object with these methods:
+#### Client Parameters
 
-#### Methods
+- `accessKey` (string): Your EnSync access key
+- `options` (object, optional):
+  - `appSecretKey` (string): Application secret key for enhanced security
+  - `clientId` (string): Custom client ID (default: auto-generated UUID)
 
-##### on(callback)
+#### Client Returns
 
-Sets up an event handler for incoming messages.
+Returns a new EnSyncClient instance
 
-- **callback**: `Function(event)` - Function called when events are received
+---
 
-##### ack(eventIdem, block)
+### Publishing Events
 
-Acknowledges receipt of an event.
+```javascript
+await client.publish(
+  "event/name",           // Event name
+  ["recipient-id"],       // Recipients
+  { data: "payload" }     // Event payload
+);
+```
 
-- **eventIdem**: `string` - Event identifier
-- **block**: `string` - Block identifier
-- **Returns**: `Promise<string>` - Acknowledgment response
+#### Publish Parameters
 
-##### rollback(eventIdem, block)
+- `eventName` (string): Name of the event to publish
+- `recipients` (array): Array of recipient IDs
+- `payload` (object): Event data payload
+- `options` (object, optional):
+  - `appSecretKey` (string): Application secret key
+  - `ttl` (number): Time-to-live in seconds (default: 3600)
 
-Rolls back an event (marks it as not processed).
+---
 
-- **eventIdem**: `string` - Event identifier
-- **block**: `string` - Block identifier
-- **Returns**: `Promise<string>` - Rollback response
+### Subscribing to Events
 
-##### unsubscribe()
+```javascript
+const subscription = await client.subscribe(eventName, options);
+```
 
-Unsubscribes from the event.
+#### Subscribe Parameters
 
-- **Returns**: `Promise<string>` - Unsubscribe response
+- `eventName` (string): Name of the event to subscribe to
+- `options` (object, optional):
+  - `appSecretKey` (string): Application secret key
+  - `autoAck` (boolean): Automatically acknowledge events (default: true)
+  - `fromTimestamp` (number): Subscribe from specific timestamp
 
-### Publishing
+#### Subscribe Returns
 
-#### publish(eventName, recipients, payload, metadata)
+Returns a subscription object with the following methods:
 
-Publishes an event to specific recipients.
+```typescript
+{
+  on: (callback: (record: EnSyncEventPayload) => Promise<void>) => void;
+  ack: (eventId: string, block: string) => Promise<string>;
+  rollback: (eventId: string, block: string) => Promise<string>;
+  unsubscribe: () => Promise<string>;
+}
+```
 
-- **eventName**: `string` - Name of the event
-- **recipients**: `string[]` - Array of recipient identifiers
-- **payload**: `Object` - Event data (any JSON-serializable object)
-- **metadata**: `Object` - Optional metadata
-  - **persist**: `boolean` - Whether to persist the event (default: true)
-  - **headers**: `Object` - Additional headers
-- **Returns**: `Promise<string>` - Publish response
+---
+
+### Event Structure
+
+```javascript
+{
+  id: "event-id",                // Unique event ID
+  block: "block-id",             // Block ID for acknowledgment
+  data: { /* payload */ },       // User-defined payload
+  timestamp: 1634567890123,      // Event timestamp
+  metadata: {                    // Metadata object
+    sender: "sender-id"          // Sender client ID (if available)
+  },
+  eventName: "event/name"        // Name of the event
+}
+```
+
+---
+
+### Closing Connections
+
+```javascript
+await client.destroy(stopEngine)
+```
+
+#### Destroy Parameters
+
+- `stopEngine` (boolean, optional): If true, also closes the underlying engine connection. Set to false to keep the engine running for other clients. (default: false)
+
+---
 
 ## Error Handling
 
-The SDK uses the `EnSyncError` class for all errors. You can catch and handle these errors as follows:
+The SDK throws `EnSyncError` for various error conditions. Always wrap your code in try-catch blocks to handle potential errors gracefully.
 
 ```javascript
 try {
-  await client.publish("event/name", ["recipient"], { data: "value" });
-} catch (error) {
-  if (error.name === "EnSyncPublishError") {
-    console.error("Failed to publish event:", error.message);
-  } else if (error.name === "EnSyncConnectionError") {
-    console.error("Connection error:", error.message);
+  // Your EnSync code
+} catch (e) {
+  if (e instanceof EnSyncError) {
+    console.error("EnSync Error:", e.message);
+    // Handle specific error types
+    if (e.name === "EnSyncConnectionError") {
+      // Handle connection errors
+    } else if (e.name === "EnSyncPublishError") {
+      // Handle publishing errors
+    } else if (e.name === "EnSyncSubscriptionError") {
+      // Handle subscription errors
+    }
   } else {
-    console.error("Unknown error:", error);
+    console.error("Unexpected error:", e);
   }
 }
 ```
 
 Common error types:
+
 - `EnSyncConnectionError`: Connection or authentication issues
 - `EnSyncPublishError`: Problems publishing events
 - `EnSyncSubscriptionError`: Subscription-related errors
 - `EnSyncGenericError`: Other errors
 
-## Examples
+---
 
-### Real-time Data Streaming
+## Complete Examples
+
+### Event Producer
 
 ```javascript
-// Producer
-async function streamSensorData(client, sensorId) {
-  setInterval(async () => {
-    try {
-      await client.publish("sensors/readings", ["CONTROL_CENTER_ID"], {
-        sensorId,
-        temperature: Math.random() * 30,
-        humidity: Math.floor(Math.random() * 100),
-        timestamp: Date.now()
-      });
-    } catch (error) {
-      console.error("Failed to publish sensor data:", error);
-    }
-  }, 5000);
-}
+const { EnSyncEngine } = require("ensync-client-sdk");
 
-// Consumer
-async function monitorSensors(client) {
-  const subscription = await client.subscribe("sensors/readings", { 
-    appSecretKey: process.env.APP_SECRET_KEY 
-  });
-  
-  subscription.on(async (event) => {
-    console.log(`Sensor ${event.payload.sensorId}: ${event.payload.temperature}°C, ${event.payload.humidity}%`);
+const response = async () => {
+  try {
+    const eventName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL";
+    const engine = new EnSyncEngine("https://localhost:8443", {
+      disableTls: true
+    });
     
-    // Process data and acknowledge
-    await subscription.ack(event.idem, event.block);
-  });
+    const client = await engine.createClient("your-access-key");
+    
+    // Payload is user-defined
+    await client.publish(eventName, [
+      "recipient-id"
+    ], {
+      transactionId: "123",
+      amount: 100,
+      terminal: "pos-1",
+      timestamp: Date.now()
+    });
+    
+    await client.destroy();
+  } catch(e) {
+    console.error("Error:", e?.message);
+  }
 }
 ```
 
-### Secure Communication
+---
+
+### Event Subscriber
+
+```javascript
+const { EnSyncEngine } = require("ensync-client-sdk");
+
+const response = async () => {
+  try {
+    const eventName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL";
+    const engine = new EnSyncEngine("https://localhost:8443", {
+      disableTls: true
+    });
+    
+    const client = await engine.createClient("your-access-key");
+    const subscription = await client.subscribe(eventName);
+    
+    subscription.on(async (event) => {
+      try {
+        // event is an EnSyncEventPayload
+        console.log("Event ID:", event.id);
+        console.log("Event Block:", event.block);
+        console.log("Event Data:", event.data);  // Contains the user-defined payload
+        console.log("Event Timestamp:", event.timestamp);
+        
+        await subscription.ack(event.id, event.block);
+        await subscription.unsubscribe();
+      } catch (e) {
+        console.error("Processing error:", e);
+      }
+    });
+  } catch(e) {
+    console.error("Error:", e?.message);
+  }
+}
+```
+
+---
+
+## Best Practices
+
+### Connection Management
+
+- Store connection credentials securely using environment variables
+- Implement proper reconnection logic for production environments
+- Always close connections when they're no longer needed
 
 ```javascript
 // Using environment variables for sensitive keys
@@ -258,35 +281,49 @@ require('dotenv').config();
 const engine = new EnSyncEngine(process.env.ENSYNC_URL);
 const client = await engine.createClient(process.env.ENSYNC_ACCESS_KEY);
 
-// Publish with encrypted payload (encryption handled by SDK)
+// Implement proper error handling and reconnection
+engine.on('disconnect', () => {
+  console.log('Connection lost, will reconnect automatically');
+});
+
+// Close connections when done
+process.on('SIGINT', async () => {
+  await client.destroy(true);
+  process.exit(0);
+});
+```
+
+### Event Design
+
+- Use hierarchical event names (e.g., `domain/entity/action`)
+- Keep payloads concise and well-structured
+- Consider versioning your event schemas
+
+```javascript
+// Good event naming pattern
 await client.publish(
-  "secure/messages",
-  [process.env.RECIPIENT_ID],
+  "inventory/product/created",
+  ["warehouse-service"],
   {
-    message: "This content is automatically encrypted",
-    timestamp: Date.now()
+    productId: "prod-123",
+    name: "Ergonomic Chair",
+    sku: "ERG-CH-BLK",
+    price: 299.99,
+    createdAt: Date.now()
   }
 );
 ```
 
-## Best Practices
+### Security Best Practices
 
-1. **Connection Management**
-   - Store connection credentials securely using environment variables
-   - Implement proper reconnection logic for production environments
+- Never hardcode access keys or secret keys
+- Use environment variables or secure key management solutions
+- Implement proper authentication and authorization
+- Consider encrypting sensitive payloads
 
-2. **Event Design**
-   - Use hierarchical event names (e.g., `domain/entity/action`)
-   - Keep payloads concise and well-structured
+### Performance Optimization
 
-3. **Error Handling**
-   - Always wrap SDK calls in try/catch blocks
-   - Implement exponential backoff for retries
-
-4. **Security**
-   - Never hardcode access keys or secret keys
-   - Use environment variables or secure key management solutions
-
-5. **Performance**
-   - Batch events when possible instead of sending many small messages
-   - Consider message size and frequency in high-volume scenarios
+- Batch events when possible instead of sending many small messages
+- Consider message size and frequency in high-volume scenarios
+- Use appropriate TTL values for your use case
+- Implement proper error handling and retry logic
