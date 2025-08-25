@@ -59,9 +59,6 @@ class EnSyncEngine {
         if (options.pingInterval) this.#config.pingInterval = options.pingInterval;
         if (options.reconnectInterval) this.#config.reconnectInterval = options.reconnectInterval;
         if (options.maxReconnectAttempts) this.#config.maxReconnectAttempts = options.maxReconnectAttempts;
-        
-        // Support self-signed certificates in development
-        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
     }
 
     /**

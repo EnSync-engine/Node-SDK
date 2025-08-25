@@ -62,19 +62,18 @@ const engine = new EnSyncEngine(url, options);
 ### Creating a Client
 
 - Initialize the engine with your server URL
-- Create a client with your access key
+- Create a client with your app key
 
 ```javascript
 const engine = new EnSyncEngine("https://node.gms.ensync.cloud");
-const client = await engine.createClient("your-access-key");
+const client = await engine.createClient("your-app-key");
 ```
 
 #### Client Parameters
 
-- `accessKey` (string): Your EnSync access key
+- `appKey` (string): Your EnSync application key
 - `options` (object, optional):
-  - `appSecretKey` (string): Application secret key for enhanced security
-  - `clientId` (string): Custom client ID (default: auto-generated UUID)
+  - `appSecretKey` (string): Default key used to decrypt incoming messages
 
 #### Client Returns
 
@@ -88,7 +87,8 @@ Returns a new EnSyncClient instance
 await client.publish(
   "event/name",           // Event name
   ["recipient-id"],       // Recipients
-  { data: "payload" }     // Event payload
+  { data: "payload" },     // Event payload
+  { persist: true, headers: {} }  // Metadata
 );
 ```
 
@@ -97,8 +97,10 @@ await client.publish(
 - `eventName` (string): Name of the event to publish
 - `recipients` (array): Array of recipient IDs
 - `payload` (object): Event data payload
+- `metadata` (object, optional): Event metadata
+  - `persist` (boolean): Whether to persist the event (default: true)
+  - `headers` (object): Custom headers for the event
 - `options` (object, optional):
-  - `appSecretKey` (string): Application secret key
   - `ttl` (number): Time-to-live in seconds (default: 3600)
 
 ---
@@ -113,7 +115,7 @@ const subscription = await client.subscribe(eventName, options);
 
 - `eventName` (string): Name of the event to subscribe to
 - `options` (object, optional):
-  - `appSecretKey` (string): Application secret key
+  - `appSecretKey` (string): Optional separate key to decrypt messages (if different from the default key)
   - `autoAck` (boolean): Automatically acknowledge events (default: true)
   - `fromTimestamp` (number): Subscribe from specific timestamp
 
@@ -208,7 +210,7 @@ const response = async () => {
       disableTls: true
     });
     
-    const client = await engine.createClient("your-access-key");
+    const client = await engine.createClient("your-app-key");
     
     // Payload is user-defined
     await client.publish(eventName, [
@@ -218,6 +220,9 @@ const response = async () => {
       amount: 100,
       terminal: "pos-1",
       timestamp: Date.now()
+    }, {
+      persist: true,
+      headers: { source: "pos-system" }
     });
     
     await client.destroy();
@@ -241,7 +246,7 @@ const response = async () => {
       disableTls: true
     });
     
-    const client = await engine.createClient("your-access-key");
+    const client = await engine.createClient("your-app-key");
     const subscription = await client.subscribe(eventName);
     
     subscription.on(async (event) => {
@@ -279,7 +284,7 @@ const response = async () => {
 require('dotenv').config();
 
 const engine = new EnSyncEngine(process.env.ENSYNC_URL);
-const client = await engine.createClient(process.env.ENSYNC_ACCESS_KEY);
+const client = await engine.createClient(process.env.ENSYNC_APP_KEY);
 
 // Implement proper error handling and reconnection
 engine.on('disconnect', () => {
@@ -316,7 +321,7 @@ await client.publish(
 
 ### Security Best Practices
 
-- Never hardcode access keys or secret keys
+- Never hardcode app keys or secret keys
 - Use environment variables or secure key management solutions
 - Implement proper authentication and authorization
 - Consider encrypting sensitive payloads
