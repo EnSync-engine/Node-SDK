@@ -207,7 +207,7 @@ class EnSyncEngine {
             console.log(`${SERVICE_NAME} Successfully subscribed to ${eventName}`);
             return {
                 on: (handler) => this.#on(eventName, handler, options.appSecretKey, options.autoAck),
-                ack: (eventIdem, block) => this.#ack(eventIdem, block),
+                ack: (eventIdem, block, eventName) => this.#ack(eventIdem, block, eventName),
                 rollback: (eventIdem, block) => this.#rollback(eventIdem, block),
                 unsubscribe: async () => this.#unsubscribe(eventName)
             };
@@ -297,7 +297,7 @@ class EnSyncEngine {
                     timestamp: record.loggedAt,
                     payload: record.payload,
                     encryptedPayload: record.encryptedPayload,
-                    metadata: record.metadata ? JSON.parse(record.metadata) : {}
+                    metadata: record.metadata || {}
                 };
             }
             return null;
@@ -537,13 +537,13 @@ class EnSyncEngine {
      * @returns {Promise<string>} The acknowledgment response
      * @throws {EnSyncError} If acknowledgment fails
      */
-    async #ack(eventIdem, block) {
+    async #ack(eventIdem, block, eventName) {
         if (!this.#state.isAuthenticated) {
             throw new EnSyncError("Not authenticated", "EnSyncAuthError");
         }
         
         try {
-            const payload = `ACK;CLIENT_ID=:${this.#config.clientId};EVENT_IDEM=:${eventIdem};BLOCK=:${block}`;
+            const payload = `ACK;CLIENT_ID=:${this.#config.clientId};EVENT_IDEM=:${eventIdem};BLOCK=:${block};EVENT_NAME=:${eventName}`;
             const data = await this.#sendMessage(payload);
             return data;
         } catch (e) {

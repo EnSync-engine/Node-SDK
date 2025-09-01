@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { EnSyncEngine } = require('ensync-client-sdk');
+const { EnSyncEngine } = require('../websocket');
 
 console.log('Starting WebSocket producer test...');
 
@@ -35,23 +35,23 @@ const response = async () => {
 
     // Publish test events
     const eventName = process.env.EVENT_TO_PUBLISH;
-    for (let index = 0; index < 3; index++) {
+    for (let index = 0; index < 1; index++) {
       console.log("index", index)
       const start = Date.now();
       try {
         // "IGZg76L6zRw0I5lHGAlAqX+U/bf5TBqRJtKOCdcZcc4="
-        const response = await client.publish(eventName, [process.env.RECEIVER_IDENTIFICATION_NUMBER ], {
-          "lat":  Math.random(),
-          "long": Math.random(),
-          "date_time": Date.now(),
-        });
-        await client.publish('progo/bicycles/speed', [process.env.RECEIVER_IDENTIFICATION_NUMBER ], {
+        // const response = await client.publish(eventName, [process.env.RECEIVER_IDENTIFICATION_NUMBER ], {
+        //   "lat":  Math.random(),
+        //   "long": Math.random(),
+        //   "date_time": Date.now(),
+        // });
+        const res = await client.publish(eventName, [process.env.RECEIVER_IDENTIFICATION_NUMBER ], {
           "meter_per_seconds": Math.floor(Math.random() * 30),
         });
         const end = Date.now();
         const duration = end - start;
         durations.push(duration);
-        console.log("Response:", response);
+        console.log("Response:", res);
         console.log("Duration", duration, "ms", "index", index);
       } catch (error) {
         console.error(`Error publishing event ${index}:`, error);

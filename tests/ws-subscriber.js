@@ -10,25 +10,21 @@ const response = async () => {
     // Subscribe to the event and set up the handler
     // Setting autoAck to false to manually acknowledge events
     // const subscription = await ensyncClient.subscribe(eventName, { autoAck: false, appSecretKey: process.env.APP_SECRET_KEY });
-    const subscription2 = await ensyncClient.subscribe("progo/bicycles/speed", { autoAck: false, appSecretKey: process.env.APP_SECRET_KEY });
+    let totalEventsReceived = 0;
+    let totalEventsAcknowledged = 0;
+    let processedEvents = [];
+    const subscription2 = await ensyncClient.subscribe(eventName, { autoAck: false, appSecretKey: process.env.APP_SECRET_KEY });
     // subscription.on(async (event) => {
       
     // });
     subscription2.on(async (event) => {
       try {
         console.log("\nSpeed Event received:", event);
-        
+        totalEventsReceived++;
+        processedEvents.push(event.idem);
         // Manually acknowledge the event
-        if (event.idem && event.block) {
-          // try {
-            console.log("ACK", await subscription2.ack(event.idem, event.block));
-          //   console.log(`Event ${event.idem} successfully acknowledged\n`);
-          // } catch (ackError) {
-          //   console.error(`Failed to acknowledge event ${event.idem}:`, ackError);
-          // }
-        } else {
-          console.warn("Cannot acknowledge event: missing idem or block");
-        }
+        console.log("ACK", await subscription2.ack(event.idem, event.block));
+        totalEventsAcknowledged++;
       } catch (e) {
         console.log("Exception:", e);
       }
@@ -36,6 +32,9 @@ const response = async () => {
     // Handle graceful shutdown
     process.on('SIGINT', async () => {
       console.log('\nUnsubscribing and closing connection...');
+      console.log("Total Events Received:", totalEventsReceived);
+      console.log("Total Events Acknowledged:", totalEventsAcknowledged);
+      console.log("Processed Events:", processedEvents);
       // await subscription.unsubscribe();
       await ensyncClient.close();
       process.exit(0);
