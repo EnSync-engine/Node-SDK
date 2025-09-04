@@ -207,7 +207,7 @@ class EnSyncEngine {
             console.log(`${SERVICE_NAME} Successfully subscribed to ${eventName}`);
             return {
                 on: (handler) => this.#on(eventName, handler, options.appSecretKey, options.autoAck),
-                ack: (eventIdem, block, eventName) => this.#ack(eventIdem, block, eventName),
+                ack: (eventIdem, block) => this.#ack(eventIdem, block, eventName),
                 rollback: (eventIdem, block) => this.#rollback(eventIdem, block),
                 unsubscribe: async () => this.#unsubscribe(eventName)
             };
@@ -429,8 +429,9 @@ class EnSyncEngine {
         // Process response
         if (message.startsWith('+PASS:') || message.startsWith('-FAIL:')) {
             // Resolve the oldest pending callback
-            const [callbackId, callback] = Array.from(this.#messageCallbacks.entries())[0];
-            if (callback) {
+            const entries = Array.from(this.#messageCallbacks.entries());
+            if (entries.length > 0) {
+                const [callbackId, callback] = entries[0];
                 clearTimeout(callback.timeout);
                 this.#messageCallbacks.delete(callbackId);
                 
@@ -547,9 +548,8 @@ class EnSyncEngine {
             const data = await this.#sendMessage(payload);
             return data;
         } catch (e) {
-            console.log("ACK Error", e);
             throw new EnSyncError(
-                "Failed to acknowledge event. " + GENERIC_MESSAGE,
+                "Failed to acknowledge event. " + e.message,
                 "EnSyncGenericError"
             );
         }
@@ -573,7 +573,7 @@ class EnSyncEngine {
             return data;
         } catch (e) {
             throw new EnSyncError(
-                "Failed to trigger rollback. " + GENERIC_MESSAGE,
+                "Failed to trigger rollback. " + e.message,
                 "EnSyncGenericError"
             );
         }
