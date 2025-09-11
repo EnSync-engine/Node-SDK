@@ -173,10 +173,17 @@ class EnSyncEngine {
             const responses = [];
             // Encrypt and send for each recipient individually
             for (const recipient of recipients) {
+                const encryptStart = Date.now();
                 const encrypted = encryptEd25519(JSON.stringify(payload), naclUtil.decodeBase64(recipient));
                 const encryptedBase64 = naclUtil.encodeBase64(Buffer.from(JSON.stringify(encrypted)));
+                const encryptDuration = Date.now() - encryptStart;
+
+                const publishStart = Date.now();
                 const message = `PUB;CLIENT_ID=:${this.#config.clientId};EVENT_NAME=:${eventName};PAYLOAD=:${encryptedBase64};DELIVERY_TO=:${recipient};METADATA=:${JSON.stringify(metadata)}`;
                 const response = await this.#sendMessage(message);
+                const publishDuration = Date.now() - publishStart;
+
+                console.log(`Performance metrics for recipient ${recipient.slice(0,10)}...:\n  Encryption: ${encryptDuration}ms\n  Publish+Response: ${publishDuration}ms`);
                 responses.push(response);
             }
             
@@ -187,9 +194,155 @@ class EnSyncEngine {
     }
 
     /**
+     * Permanently rejects an event without processing
+     * @param {string} eventId - Unique identifier of the event
+     * @param {string} [reason] - Optional explanation for discarding
+     * @returns {Promise<Object>} Response object with status, action, eventId, and timestamp
+     * @throws {EnSyncError} If event is not found or operation fails
+     */
+    async #discardEvent(eventId, reason = "") {
+        if (!this.#state.isAuthenticated) {
+            throw new EnSyncError("Not authenticated", "EnSyncAuthError");
+        }
+
+        try {
+            const message = `DISCARD;CLIENT_ID=:${this.#config.clientId};EVENT_IDEM=:${eventId};REASON=:${reason}`;
+            const response = await this.#sendMessage(message);
+            
+            if (response.startsWith("-FAIL:")) {
+                throw new EnSyncError(response.substring(6), "EnSyncEventError");
+            }
+
+            return {
+                status: "success",
+                action: "discarded",
+                eventId,
+                timestamp: Date.now()
+            };
+        } catch (error) {
+            if (error instanceof EnSyncError) throw error;
+            throw new EnSyncError(error, "EnSyncDiscardError");
+        }
+    }
+
+    /**
+     * Postpones processing of an event for later delivery
+     * @param {string} eventId - Unique identifier of the event
+     * @param {number} delayMs - Milliseconds to delay (1000ms to 24h)
+     * @param {string} [reason] - Optional explanation for deferring
+     * @returns {Promise<Object>} Response object with status, action, eventId, delayMs, scheduledDelivery, and timestamp
+     * @throws {EnSyncError} If event is not found, delay is invalid, or operation fails
+     */
+    async #deferEvent(eventId, delayMs = 0, reason = "") {
+        if (!this.#state.isAuthenticated) {
+            throw new EnSyncError("Not authenticated", "EnSyncAuthError");
+        }
+
+        // Validate delay range (1 second to 24 hours)
+        if (delayMs !== 0 && (delayMs < 1000 || delayMs > 24 * 60 * 60 * 1000)) {
+            throw new EnSyncError(INVALID_DELAY, "EnSyncValidationError");
+        }
+
+        try {
+            const message = `DEFER;CLIENT_ID=:${this.#config.clientId};EVENT_IDEM=:${eventId};DELAY=:${delayMs};REASON=:${reason}`;
+            const response = await this.#sendMessage(message);
+            
+            if (response.startsWith("-FAIL")) {
+                throw new EnSyncError(response.substring(6), "EnSyncEventError");
+            }
+
+            const now = Date.now();
+            return {
+                status: "success",
+                action: "deferred",
+                eventId,
+                delayMs,
+                scheduledDelivery: now + delayMs,
+                timestamp: now
+            };
+        } catch (error) {
+            if (error instanceof EnSyncError) throw error;
+            throw new EnSyncError(error, "EnSyncDeferError");
+        }
+    }
+
+    /**
+     * Resumes event processing after defer/skip operations
+     * @param {string} eventName - Name of the event to resume processing for
+     * @returns {Promise<Object>} Response object with status, action, and eventName
+     * @throws {EnSyncError} If operation fails
+     */
+    async #continueProcessing(eventName) {
+        if (!this.#state.isAuthenticated) {
+            throw new EnSyncError("Not authenticated", "EnSyncAuthError");
+        }
+
+        try {
+            const message = `CONTINUE;CLIENT_ID=:${this.#config.clientId};EVENT_NAME=:${eventName}`;
+            const response = await this.#sendMessage(message);
+
+            if (response.startsWith("-FAIL:")) {
+                throw new EnSyncError(response.substring(6), "EnSyncContinueError");
+            }
+
+            return {
+                status: "success",
+                action: "continued",
+                eventName
+            };
+        } catch (error) {
+            if (error instanceof EnSyncError) throw error;
+            throw new EnSyncError(error, "EnSyncContinueError");
+        }
+    }
+
+    /**
+     * Pauses event processing for a specific event
+     * @param {string} eventName - Name of the event to pause processing for
+     * @param {string} [reason] - Optional explanation for pausing
+     * @returns {Promise<Object>} Response object with status, action, and eventName
+     * @throws {EnSyncError} If operation fails
+     */
+    async #pauseProcessing(eventName, reason = "") {
+        if (!this.#state.isAuthenticated) {
+            throw new EnSyncError("Not authenticated", "EnSyncAuthError");
+        }
+
+        try {
+            const message = `PAUSE;CLIENT_ID=:${this.#config.clientId};EVENT_NAME=:${eventName};REASON=:${reason}`;
+            const response = await this.#sendMessage(message);
+
+            if (response.startsWith("-FAIL:")) {
+                throw new EnSyncError(response.substring(6), "EnSyncPauseError");
+            }
+
+            return {
+                status: "success",
+                action: "paused",
+                eventName,
+                reason: reason || undefined
+            };
+        } catch (error) {
+            if (error instanceof EnSyncError) throw error;
+            throw new EnSyncError(error, "EnSyncPauseError");
+        }
+    }
+
+    /**
      * Subscribes to an event
      * @param {string} eventName - Name of the event to subscribe to
-     * @returns {Promise<void>}
+     * @param {Object} options - Subscription options
+     * @param {boolean} [options.autoAck=false] - Whether to automatically acknowledge events
+     * @param {string} [options.appSecretKey=null] - App secret key for decrypting messages
+     * @returns {Promise<Object>} Subscription object with methods for event handling
+     * @returns {Function} subscription.on - Add an event handler
+     * @returns {Function} subscription.ack - Acknowledge an event
+     * @returns {Function} subscription.continue - Resume event processing
+     * @returns {Function} subscription.pause - Pause event processing
+     * @returns {Function} subscription.defer - Defer an event
+     * @returns {Function} subscription.discard - Discard an event
+     * @returns {Function} subscription.rollback - Rollback an event
+     * @returns {Function} subscription.unsubscribe - Unsubscribe from the event
      * @throws {EnSyncError} If subscription fails
      */
     async subscribe(eventName, options = {autoAck: false, appSecretKey: null}) {
@@ -208,6 +361,10 @@ class EnSyncEngine {
             return {
                 on: (handler) => this.#on(eventName, handler, options.appSecretKey, options.autoAck),
                 ack: (eventIdem, block) => this.#ack(eventIdem, block, eventName),
+                continue: () => this.#continueProcessing(eventName),
+                pause: (reason = "") => this.#pauseProcessing(eventName, reason),
+                defer: (eventIdem, delayMs, reason = "") => this.#deferEvent(eventIdem, delayMs, reason),
+                discard: (eventIdem, block) => this.#discardEvent(eventIdem, block),
                 rollback: (eventIdem, block) => this.#rollback(eventIdem, block),
                 unsubscribe: async () => this.#unsubscribe(eventName)
             };
@@ -371,6 +528,7 @@ class EnSyncEngine {
             this.#messageCallbacks.set(messageId, { resolve, reject, timeout });
             
             if (this.#ws && this.#ws.readyState === WebSocket.OPEN) {
+                console.log("message", message)
                 this.#ws.send(message);
             } else {
                 clearTimeout(timeout);
@@ -484,10 +642,16 @@ class EnSyncEngine {
             const delay = this.#config.reconnectInterval * Math.pow(1.5, this.#state.reconnectAttempts - 1);
             console.log(`${SERVICE_NAME} Attempting reconnect ${this.#state.reconnectAttempts}/${this.#config.maxReconnectAttempts} in ${delay}ms...`);
             
-            this.#state.reconnectTimeout = setTimeout(() => {
-                this.connect().catch(error => {
+            this.#state.reconnectTimeout = setTimeout(async () => {
+                try {
+                    // Use await here to ensure authentication completes
+                    await this.connect();
+                    
+                    // Notify reconnect handlers after successful reconnection
+                    this.#eventHandlers.reconnect.forEach(handler => handler());
+                } catch (error) {
                     console.error(`${SERVICE_NAME} Reconnection attempt failed:`, error);
-                });
+                }
             }, delay);
         } else if (this.#state.reconnectAttempts >= this.#config.maxReconnectAttempts) {
             console.error(`${SERVICE_NAME} Maximum reconnection attempts (${this.#config.maxReconnectAttempts}) reached. Giving up.`);

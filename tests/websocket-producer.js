@@ -29,22 +29,17 @@ const response = async () => {
     const client = await wsEngine.createClient(process.env.ENSYNC_ACCESS_KEY);
     console.log('Successfully created and authenticated WebSocket client');
 
+
     // Track statistics
     const durations = [];
     const totalStartTime = Date.now();
 
     // Publish test events
     const eventName = process.env.EVENT_TO_PUBLISH;
-    for (let index = 0; index < 1; index++) {
+    for (let index = 0; index < 5; index++) {
       console.log("index", index)
       const start = Date.now();
       try {
-        // "IGZg76L6zRw0I5lHGAlAqX+U/bf5TBqRJtKOCdcZcc4="
-        // const response = await client.publish(eventName, [process.env.RECEIVER_IDENTIFICATION_NUMBER ], {
-        //   "lat":  Math.random(),
-        //   "long": Math.random(),
-        //   "date_time": Date.now(),
-        // });
         const res = await client.publish(eventName, [process.env.RECEIVER_IDENTIFICATION_NUMBER ], {
           "meter_per_seconds": Math.floor(Math.random() * 30),
         });
@@ -72,10 +67,6 @@ const response = async () => {
     console.log("Date of Execution", new Date().toLocaleString());
     console.log(`\nTotal execution time: ${(totalTime / 1000).toFixed(2)} seconds\n`);
     console.log('=====================');
-
-    // // Close the WebSocket connection
-    // await ensyncClient.close();
-    // console.log("WebSocket connection closed");
 
   } catch (error) {
     console.error('Fatal error occurred:', error);
