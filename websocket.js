@@ -173,17 +173,11 @@ class EnSyncEngine {
             const responses = [];
             // Encrypt and send for each recipient individually
             for (const recipient of recipients) {
-                const encryptStart = Date.now();
                 const encrypted = encryptEd25519(JSON.stringify(payload), naclUtil.decodeBase64(recipient));
                 const encryptedBase64 = naclUtil.encodeBase64(Buffer.from(JSON.stringify(encrypted)));
-                const encryptDuration = Date.now() - encryptStart;
 
-                const publishStart = Date.now();
                 const message = `PUB;CLIENT_ID=:${this.#config.clientId};EVENT_NAME=:${eventName};PAYLOAD=:${encryptedBase64};DELIVERY_TO=:${recipient};METADATA=:${JSON.stringify(metadata)}`;
                 const response = await this.#sendMessage(message);
-                const publishDuration = Date.now() - publishStart;
-
-                console.log(`Performance metrics for recipient ${recipient.slice(0,10)}...:\n  Encryption: ${encryptDuration}ms\n  Publish+Response: ${publishDuration}ms`);
                 responses.push(response);
             }
             
@@ -342,10 +336,11 @@ class EnSyncEngine {
      * @returns {Function} subscription.defer - Defer an event
      * @returns {Function} subscription.discard - Discard an event
      * @returns {Function} subscription.rollback - Rollback an event
+     * @returns {Function} subscription.replay - Request a specific event to be sent again
      * @returns {Function} subscription.unsubscribe - Unsubscribe from the event
      * @throws {EnSyncError} If subscription fails
      */
-    async subscribe(eventName, options = {autoAck: false, appSecretKey: null}) {
+    async subscribe(eventName, options = {autoAck: true, appSecretKey: null}) {
         if (!this.#state.isAuthenticated) {
             throw new EnSyncError("Not authenticated", "EnSyncAuthError");
         }
@@ -366,6 +361,7 @@ class EnSyncEngine {
                 defer: (eventIdem, delayMs, reason = "") => this.#deferEvent(eventIdem, delayMs, reason),
                 discard: (eventIdem, block) => this.#discardEvent(eventIdem, block),
                 rollback: (eventIdem, block) => this.#rollback(eventIdem, block),
+                replay: (eventIdem) => this.#replay(eventIdem, eventName),
                 unsubscribe: async () => this.#unsubscribe(eventName)
             };
         } else {
@@ -380,7 +376,7 @@ class EnSyncEngine {
      * @param {string} appSecretKey - App secret key for authentication
      * @returns {Function} Unsubscribe function
      */
-    #on(eventName, handler, appSecretKey, autoAck = false) {
+    #on(eventName, handler, appSecretKey, autoAck = true) {
         if (!this.#subscriptions.has(eventName)) {
             this.#subscriptions.set(eventName, new Set());
         }
@@ -431,6 +427,7 @@ class EnSyncEngine {
             if (!message.startsWith("+RECORD:")) return null;
 
             const content = message.replace("+RECORD:", "");
+            console.log("Content", content);
             const record = JSON.parse(content);
             
             if (record && record.constructor.name === "Object") {
@@ -572,9 +569,14 @@ class EnSyncEngine {
                         
                         // Auto-acknowledge if enabled
                         if (autoAck && eventData.idem && eventData.block) {
-                            this.#ack(eventData.idem, eventData.block).catch(err => {
-                                console.error(`${SERVICE_NAME} Auto-acknowledge error:`, err);
-                            });
+                            // Make this an async IIFE to properly await the acknowledgment
+                            (async () => {
+                                try {
+                                    await this.#ack(eventData.idem, eventData.block, eventData.eventName);
+                                } catch (err) {
+                                    console.error(`${SERVICE_NAME} Auto-acknowledge error:`, err);
+                                }
+                            })();
                         }
                     } catch (e) {
                         console.error(`${SERVICE_NAME} Event handler error -`, e);
@@ -740,6 +742,42 @@ class EnSyncEngine {
                 "Failed to trigger rollback. " + e.message,
                 "EnSyncGenericError"
             );
+        }
+    }
+    
+    /**
+     * Requests a specific event to be replayed/sent again
+     * @param {string} eventIdem - The unique identifier of the event to replay
+     * @param {string} eventName - The name of the event to replay
+     * @returns {Promise<Object>} Response object with status and event details
+     * @throws {EnSyncError} If replay request fails
+     */
+    async #replay(eventIdem, eventName) {
+        if (!this.#state.isAuthenticated) {
+            throw new EnSyncError("Not authenticated", "EnSyncAuthError");
+        }
+        
+        if (!eventIdem) {
+            throw new EnSyncError("Event identifier (eventIdem) is required", "EnSyncReplayError");
+        }
+        
+        try {
+            const message = `REPLAY;CLIENT_ID=:${this.#config.clientId};EVENT_IDEM=:${eventIdem};EVENT_NAME=:${eventName}`;
+            const response = await this.#sendMessage(message);
+            
+            if (response.startsWith("-FAIL:")) {
+                throw new EnSyncError(response.substring(6), "EnSyncReplayError");
+            }
+            
+            return {
+                status: "success",
+                action: "replayed",
+                eventIdem,
+                timestamp: Date.now()
+            };
+        } catch (error) {
+            if (error instanceof EnSyncError) throw error;
+            throw new EnSyncError(error, "EnSyncReplayError");
         }
     }
 
