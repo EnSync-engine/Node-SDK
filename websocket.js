@@ -189,18 +189,19 @@ class EnSyncEngine {
 
     /**
      * Permanently rejects an event without processing
-     * @param {string} eventId - Unique identifier of the event
-     * @param {string} [reason] - Optional explanation for discarding
+     * @param {string} eventId - Unique identifier of the event (required)
+     * @param {string} eventName - Name of the event (required)
+     * @param {string} [reason=""] - Optional explanation for discarding
      * @returns {Promise<Object>} Response object with status, action, eventId, and timestamp
      * @throws {EnSyncError} If event is not found or operation fails
      */
-    async #discardEvent(eventId, reason = "") {
+    async #discardEvent(eventId, eventName, reason = "") {
         if (!this.#state.isAuthenticated) {
             throw new EnSyncError("Not authenticated", "EnSyncAuthError");
         }
 
         try {
-            const message = `DISCARD;CLIENT_ID=:${this.#config.clientId};EVENT_IDEM=:${eventId};REASON=:${reason}`;
+            const message = `DISCARD;CLIENT_ID=:${this.#config.clientId};EVENT_IDEM=:${eventId};EVENT_NAME=:${eventName};REASON=:${reason}`;
             const response = await this.#sendMessage(message);
             
             if (response.startsWith("-FAIL:")) {
@@ -221,9 +222,9 @@ class EnSyncEngine {
 
     /**
      * Postpones processing of an event for later delivery
-     * @param {string} eventId - Unique identifier of the event
-     * @param {number} delayMs - Milliseconds to delay (1000ms to 24h)
-     * @param {string} [reason] - Optional explanation for deferring
+     * @param {string} eventId - Unique identifier of the event (required)
+     * @param {number} delayMs - Milliseconds to delay (1000ms to 24h, or 0 for immediate redelivery) (required)
+     * @param {string} [reason=""] - Optional explanation for deferring
      * @returns {Promise<Object>} Response object with status, action, eventId, delayMs, scheduledDelivery, and timestamp
      * @throws {EnSyncError} If event is not found, delay is invalid, or operation fails
      */
@@ -262,9 +263,9 @@ class EnSyncEngine {
 
     /**
      * Resumes event processing after defer/skip operations
-     * @param {string} eventName - Name of the event to resume processing for
+     * @param {string} eventName - Name of the event to resume processing for (required)
      * @returns {Promise<Object>} Response object with status, action, and eventName
-     * @throws {EnSyncError} If operation fails
+     * @throws {EnSyncError} If operation fails or eventName is missing
      */
     async #continueProcessing(eventName) {
         if (!this.#state.isAuthenticated) {
@@ -292,10 +293,10 @@ class EnSyncEngine {
 
     /**
      * Pauses event processing for a specific event
-     * @param {string} eventName - Name of the event to pause processing for
-     * @param {string} [reason] - Optional explanation for pausing
-     * @returns {Promise<Object>} Response object with status, action, and eventName
-     * @throws {EnSyncError} If operation fails
+     * @param {string} eventName - Name of the event to pause processing for (required)
+     * @param {string} [reason=""] - Optional explanation for pausing
+     * @returns {Promise<Object>} Response object with status, action, eventName, and reason
+     * @throws {EnSyncError} If operation fails or eventName is missing
      */
     async #pauseProcessing(eventName, reason = "") {
         if (!this.#state.isAuthenticated) {
@@ -330,14 +331,23 @@ class EnSyncEngine {
      * @param {string} [options.appSecretKey=null] - App secret key for decrypting messages
      * @returns {Promise<Object>} Subscription object with methods for event handling
      * @returns {Function} subscription.on - Add an event handler
+     * @returns {Function} subscription.on(handler) - Register a handler function that receives event data
      * @returns {Function} subscription.ack - Acknowledge an event
-     * @returns {Function} subscription.continue - Resume event processing
+     * @returns {Function} subscription.ack(eventIdem, block) - Acknowledge receipt of an event with its ID and block
+     * @returns {Function} subscription.resume - Resume event processing
+     * @returns {Function} subscription.resume() - Resume processing of events for this subscription
      * @returns {Function} subscription.pause - Pause event processing
+     * @returns {Function} subscription.pause([reason]) - Pause event delivery with optional reason
      * @returns {Function} subscription.defer - Defer an event
+     * @returns {Function} subscription.defer(eventIdem, delayMs, [reason]) - Defer processing of an event for specified milliseconds
      * @returns {Function} subscription.discard - Discard an event
+     * @returns {Function} subscription.discard(eventIdem, [reason]) - Permanently discard an event with optional reason
      * @returns {Function} subscription.rollback - Rollback an event
+     * @returns {Function} subscription.rollback(eventIdem, block) - Roll back an event with its ID and block
      * @returns {Function} subscription.replay - Request a specific event to be sent again
+     * @returns {Function} subscription.replay(eventIdem) - Request replay of a specific event by ID
      * @returns {Function} subscription.unsubscribe - Unsubscribe from the event
+     * @returns {Function} subscription.unsubscribe() - Stop receiving events for this subscription
      * @throws {EnSyncError} If subscription fails
      */
     async subscribe(eventName, options = {autoAck: true, appSecretKey: null}) {
@@ -356,12 +366,12 @@ class EnSyncEngine {
             return {
                 on: (handler) => this.#on(eventName, handler, options.appSecretKey, options.autoAck),
                 ack: (eventIdem, block) => this.#ack(eventIdem, block, eventName),
-                continue: () => this.#continueProcessing(eventName),
+                resume: () => this.#continueProcessing(eventName),
                 pause: (reason = "") => this.#pauseProcessing(eventName, reason),
                 defer: (eventIdem, delayMs, reason = "") => this.#deferEvent(eventIdem, delayMs, reason),
-                discard: (eventIdem, block) => this.#discardEvent(eventIdem, block),
+                discard: (eventIdem, reason = "") => this.#discardEvent(eventIdem, eventName, reason),
                 rollback: (eventIdem, block) => this.#rollback(eventIdem, block),
-                replay: (eventIdem) => this.#replay(eventIdem, eventName),
+                replay: (eventIdem) => this.#replay(eventIdem, eventName, options.appSecretKey),
                 unsubscribe: async () => this.#unsubscribe(eventName)
             };
         } else {
@@ -372,9 +382,10 @@ class EnSyncEngine {
     /**
      * Adds an event handler for a subscribed event
      * @param {string} eventName - Name of the event
-     * @param {Function} handler - Event handler function
-     * @param {string} appSecretKey - App secret key for authentication
-     * @returns {Function} Unsubscribe function
+     * @param {Function} handler - Event handler function that receives the event data
+     * @param {string} [appSecretKey] - Optional app secret key for decryption (overrides client key)
+     * @param {boolean} [autoAck=true] - Whether to automatically acknowledge events
+     * @returns {Function} Unsubscribe function that removes this handler when called
      */
     #on(eventName, handler, appSecretKey, autoAck = true) {
         if (!this.#subscriptions.has(eventName)) {
@@ -418,16 +429,44 @@ class EnSyncEngine {
     }
 
     /**
+     * Decrypts an encrypted payload using the provided key or fallback keys
+     * @private
+     * @param {Object} eventData - The event data containing the encrypted payload
+     * @param {string} [appSecretKey] - Optional app secret key for decryption
+     * @returns {Object} Object with success flag and decrypted payload if successful
+     */
+    #decryptPayload(eventData, appSecretKey) {
+        try {
+            // Use subscription key if available, otherwise fall back to client key
+            const decryptionKey = appSecretKey || this.#config.appSecretKey || this.#config.clientHash;
+            
+            if (!decryptionKey) {
+                console.error(`${SERVICE_NAME} No decryption key available`);
+                return { success: false };
+            }
+            
+            const payload = JSON.parse(decryptEd25519(eventData.encryptedPayload, decryptionKey));
+            
+            // Remove encryptedPayload from eventData as it's no longer needed
+            delete eventData.encryptedPayload;
+            
+            return { success: true, payload };
+        } catch (decryptError) {
+            console.error(`${SERVICE_NAME} Failed to decrypt with key -`, decryptError);
+            return { success: false };
+        }
+    }
+
+    /**
      * Parses an event message
      * @private
      */
     #parseEventMessage(message) {
         try {
             if (message.startsWith("-FAIL:")) throw new EnSyncError(message, "EnSyncGenericError");
-            if (!message.startsWith("+RECORD:")) return null;
+            if (!message.startsWith("+RECORD:") && !message.startsWith("+REPLAY:")) return null;
 
-            const content = message.replace("+RECORD:", "");
-            console.log("Content", content);
+            const content = message.replace("+RECORD:", "").replace("+REPLAY:", "");
             const record = JSON.parse(content);
             
             if (record && record.constructor.name === "Object") {
@@ -446,7 +485,7 @@ class EnSyncEngine {
 
                 return {
                     eventName: record.name,
-                    idem: record.id,
+                    idem: record.idem || record.id,
                     block: record.block,
                     timestamp: record.loggedAt,
                     payload: record.payload,
@@ -497,10 +536,40 @@ class EnSyncEngine {
             this.#config.clientHash = resp.clientHash;
             this.#state.isAuthenticated = true;
 
-            // Resubscribe to events after successful authentication
-            const currentSubscriptions = Array.from(this.#subscriptions.keys());
-            for (const eventName of currentSubscriptions) {
-                await this.subscribe(eventName).catch(console.error);
+            // Store the current subscriptions before clearing them
+            const currentSubscriptions = new Map();
+            
+            // Deep copy the handlers to preserve them properly
+            for (const [eventName, handlers] of this.#subscriptions.entries()) {
+                const handlersCopy = new Set();
+                handlers.forEach(handlerObj => {
+                    handlersCopy.add({
+                        handler: handlerObj.handler,
+                        appSecretKey: handlerObj.appSecretKey,
+                        autoAck: handlerObj.autoAck
+                    });
+                });
+                currentSubscriptions.set(eventName, handlersCopy);
+            }
+            
+            // Clear existing subscriptions as we'll recreate them
+            this.#subscriptions.clear();
+            
+            // Resubscribe to each event and restore its handlers
+            for (const [eventName, handlers] of currentSubscriptions.entries()) {
+                try {
+                    console.log(`${SERVICE_NAME} Resubscribing to ${eventName}`);
+                    await this.subscribe(eventName);
+                    
+                    // Restore all handlers for this event
+                    if (handlers && handlers.size > 0) {
+                        handlers.forEach(handlerObj => {
+                            this.#on(eventName, handlerObj.handler, handlerObj.appSecretKey, handlerObj.autoAck);
+                        });
+                    }
+                } catch (error) {
+                    console.error(`${SERVICE_NAME} Failed to resubscribe to ${eventName}:`, error);
+                }
             }
             return response;
         } else {
@@ -549,45 +618,56 @@ class EnSyncEngine {
 
         // Handle event messages
         if (message.startsWith('+RECORD:')) {
-            const eventData = this.#parseEventMessage(message);
-            if (eventData && this.#subscriptions.has(eventData.eventName)) {
-                const handlers = this.#subscriptions.get(eventData.eventName);
-                handlers.forEach(({ handler, appSecretKey, autoAck }) => {
-                    try {
-                        // Use subscription key if available, otherwise fall back to client key
-                        const decryptionKey = appSecretKey || this.#config.appSecretKey || this.#config.clientHash;
-                        let finalPayload;
+            // Parse the message into event data
+            const rawEventData = this.#parseEventMessage(message);
+            console.log(`${SERVICE_NAME} Received event for ${rawEventData?.eventName || 'unknown event'}`);
+            
+            if (rawEventData && this.#subscriptions.has(rawEventData.eventName)) {
+                const handlers = this.#subscriptions.get(rawEventData.eventName);
+                console.log(`${SERVICE_NAME} Found ${handlers.size} handler(s) for event ${rawEventData.eventName}`);
+                
+                // Process handlers sequentially to maintain order
+                for (const { handler, appSecretKey, autoAck } of handlers) {
+                    // Use an async IIFE to properly handle async operations
+                    (async () => {
                         try {
-                            finalPayload = JSON.parse(decryptEd25519(eventData.encryptedPayload, decryptionKey));
-                        } catch (decryptError) {
-                            console.error(`${SERVICE_NAME} Failed to decrypt with key -`, decryptError);
-                            return; // Skip this handler if decryption fails
-                        }
-                        // Remove encryptedPayload from eventData
-                        delete eventData.encryptedPayload;
-                        handler({ ...eventData, payload: finalPayload });
-                        
-                        // Auto-acknowledge if enabled
-                        if (autoAck && eventData.idem && eventData.block) {
-                            // Make this an async IIFE to properly await the acknowledgment
-                            (async () => {
+                            // Process the event with the handler-specific key
+                            const processedEvent = this.#parseAndDecryptEvent(message, appSecretKey);
+                            
+                            if (!processedEvent || !processedEvent.payload) {
+                                console.error(`${SERVICE_NAME} Failed to process event for handler`);
+                                return; // Skip this handler if processing fails
+                            }
+                            
+                            // Call handler and properly await if it returns a Promise
+                            console.log(`${SERVICE_NAME} Executing handler for event ${processedEvent.eventName}`);
+                            const result = handler(processedEvent);
+                            if (result instanceof Promise) {
+                                await result.catch(error => {
+                                    console.error(`${SERVICE_NAME} Async handler error -`, error);
+                                });
+                            }
+                            console.log(`${SERVICE_NAME} Handler execution completed for event ${processedEvent.eventName}`);
+                            
+                            // Auto-acknowledge if enabled, AFTER handler completes
+                            if (autoAck && processedEvent.idem && processedEvent.block) {
                                 try {
-                                    await this.#ack(eventData.idem, eventData.block, eventData.eventName);
+                                    await this.#ack(processedEvent.idem, processedEvent.block, processedEvent.eventName);
                                 } catch (err) {
                                     console.error(`${SERVICE_NAME} Auto-acknowledge error:`, err);
                                 }
-                            })();
+                            }
+                        } catch (e) {
+                            console.error(`${SERVICE_NAME} Event handler error -`, e);
                         }
-                    } catch (e) {
-                        console.error(`${SERVICE_NAME} Event handler error -`, e);
-                    }
-                });
+                    })();
+                }
             }
             return;
         }
 
         // Process response
-        if (message.startsWith('+PASS:') || message.startsWith('-FAIL:')) {
+        if (message.startsWith('+PASS:') || message.startsWith('+REPLAY:') || message.startsWith('-FAIL:')) {
             // Resolve the oldest pending callback
             const entries = Array.from(this.#messageCallbacks.entries());
             if (entries.length > 0) {
@@ -595,7 +675,7 @@ class EnSyncEngine {
                 clearTimeout(callback.timeout);
                 this.#messageCallbacks.delete(callbackId);
                 
-                if (message.startsWith('+PASS:')) {
+                if (message.startsWith('+PASS:') || message.startsWith('+REPLAY:')) {
                     callback.resolve(message);
                 } else {
                     callback.reject(new EnSyncError(message.substring(6), "EnSyncError"));
@@ -699,10 +779,11 @@ class EnSyncEngine {
 
     /**
      * Acknowledges a record
-     * @param {string} eventIdem - The event identifier
-     * @param {string} block - The block identifier
+     * @param {string} eventIdem - The event identifier (required)
+     * @param {string} block - The block identifier (required)
+     * @param {string} eventName - The event name (required)
      * @returns {Promise<string>} The acknowledgment response
-     * @throws {EnSyncError} If acknowledgment fails
+     * @throws {EnSyncError} If acknowledgment fails or parameters are missing
      */
     async #ack(eventIdem, block, eventName) {
         if (!this.#state.isAuthenticated) {
@@ -723,10 +804,10 @@ class EnSyncEngine {
 
     /**
      * Rolls back a record
-     * @param {string} eventIdem - The event identifier
-     * @param {string} block - The block identifier
+     * @param {string} eventIdem - The event identifier (required)
+     * @param {string} block - The block identifier (required)
      * @returns {Promise<string>} The rollback response
-     * @throws {EnSyncError} If rollback fails
+     * @throws {EnSyncError} If rollback fails or required parameters are missing
      */
     async #rollback(eventIdem, block) {
         if (!this.#state.isAuthenticated) {
@@ -746,13 +827,42 @@ class EnSyncEngine {
     }
     
     /**
-     * Requests a specific event to be replayed/sent again
-     * @param {string} eventIdem - The unique identifier of the event to replay
-     * @param {string} eventName - The name of the event to replay
-     * @returns {Promise<Object>} Response object with status and event details
-     * @throws {EnSyncError} If replay request fails
+     * Parses and decrypts an event message without triggering handlers
+     * @private
+     * @param {string} message - The message to parse and decrypt
+     * @param {string} [appSecretKey] - Optional app secret key for decryption (overrides client key)
+     * @returns {Object} The parsed and decrypted event data
      */
-    async #replay(eventIdem, eventName) {
+    #parseAndDecryptEvent(message, appSecretKey) {
+        // First parse the event message
+        const eventData = this.#parseEventMessage(message);
+        if (!eventData) return null;
+        
+        // Then decrypt the payload if present
+        if (eventData.encryptedPayload) {
+            // Use the provided key or fall back to client's default key
+            const decryptionKey = appSecretKey || this.#config.appSecretKey;
+            const decryptionResult = this.#decryptPayload(eventData, decryptionKey);
+            if (decryptionResult.success) {
+                // Add the decrypted payload to the event data
+                eventData.payload = decryptionResult.payload;
+            } else {
+                console.warn(`${SERVICE_NAME} Could not decrypt event payload`);
+            }
+        }
+        
+        return eventData;
+    }
+    
+    /**
+     * Requests a specific event to be replayed/sent again
+     * @param {string} eventIdem - The unique identifier of the event to replay (required)
+     * @param {string} eventName - The name of the event to replay (required)
+     * @param {string} [appSecretKey] - Optional app secret key for decryption (overrides client key)
+     * @returns {Promise<Object>} Response object with status, action, eventIdem, and timestamp
+     * @throws {EnSyncError} If replay request fails or required parameters are missing
+     */
+    async #replay(eventIdem, eventName, appSecretKey) {
         if (!this.#state.isAuthenticated) {
             throw new EnSyncError("Not authenticated", "EnSyncAuthError");
         }
@@ -769,12 +879,9 @@ class EnSyncEngine {
                 throw new EnSyncError(response.substring(6), "EnSyncReplayError");
             }
             
-            return {
-                status: "success",
-                action: "replayed",
-                eventIdem,
-                timestamp: Date.now()
-            };
+            // Parse and decrypt the response without triggering handlers
+            // Use the subscription-specific appSecretKey if provided
+            return this.#parseAndDecryptEvent(response, appSecretKey);
         } catch (error) {
             if (error instanceof EnSyncError) throw error;
             throw new EnSyncError(error, "EnSyncReplayError");

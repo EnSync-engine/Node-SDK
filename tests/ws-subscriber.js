@@ -13,9 +13,13 @@ const response = async () => {
     let totalEventsReceived = 0;
     let totalEventsAcknowledged = 0;
     let processedEvents = [];
-    const subscription2 = await ensyncClient.subscribe(eventName, { autoAck: false, appSecretKey: process.env.APP_SECRET_KEY });
+    const subscription2 = await ensyncClient.subscribe(eventName, {autoAck: false});
 
     let eventCount = -1;
+
+    const replayResult = await subscription2.replay("eXNETssA19Nn");
+    console.log("Replay Result:", replayResult);
+
     subscription2.on(async (event) => {
       try {
         eventCount++;
@@ -23,8 +27,14 @@ const response = async () => {
         totalEventsReceived++;
         processedEvents.push(event.idem);
 
-        const pauseResult = await subscription2.pause("Pausing event");
-        console.log("Pause Result:", pauseResult);
+        // if (eventCount === 2) {
+        //   // const pauseResult = await subscription2.pause("Pausing event");
+        //   // console.log("Pause Result:", pauseResult);
+        //   setTimeout(async () => {
+        //     // const continueResult = await subscription2.continue();
+        //     // console.log("Continue Result:", continueResult);
+        //   }, 5000);
+        // }
         // Defer 2nd event
         // if (eventCount === 1) {
         //   console.log("\nDeferring 2nd event...");
@@ -34,22 +44,20 @@ const response = async () => {
           // Resume processing after 2 seconds
           // setTimeout(async () => {
           //   console.log("\nResuming event processing...");
-          //   const continueResult = await subscription2.continue();
-          //   console.log("Continue Result:", continueResult);
           // }, 2000);
         //   return;
         // }
 
         // Discard 5th event
         // if (eventCount === 4) {
-        //   console.log("\nDiscarding 5th event...");
-        //   const discardResult = await subscription2.discard(event.idem, "Discarding fifth event");
-        //   console.log("Discard Result:", discardResult);
+          // console.log("\nDiscarding event...");
+          const discardResult = await subscription2.discard(event.idem, "Discarding fifth event");
+          console.log("Discard Result:", discardResult);
         //   return;
         // }
 
         // Acknowledge other events
-        console.log("ACK", await subscription2.ack(event.idem, event.block));
+        // console.log("ACK", await subscription2.ack(event.idem, event.block));
         totalEventsAcknowledged++;
       } catch (e) {
         console.log("Exception:", e);

@@ -1,6 +1,6 @@
 {
   "name": "ensync-client-sdk",
-  "version": "0.0.22",
+  "version": "0.0.24",
   "description": "Client SDK for EnSync Engine",
   "main": "websocket.js",
   "exports": {
