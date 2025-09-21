@@ -440,31 +440,65 @@ When you create a client using `engine.createClient()`, that client receives a u
 
 #### Replaying Events
 
-The replay command allows you to request a specific event to be sent again, even if it has already been processed. This is useful for:
+The replay command allows you to request a specific event to be sent again, even if it has already been processed. Unlike regular event handling which delivers events through the `.on` handler, the replay function returns the event data directly to your code. This is useful for:
 
-- Recovering from processing errors
-- Reprocessing events after fixing bugs
-- Testing event handling logic with real data
-- Retrieving historical events for analysis
+- Retrieving specific events for analysis or debugging
+- Accessing historical event data without setting up a handler
+- Examining event content without processing it
+- Getting event data synchronously in your code flow
 
 ```javascript
-// Request a specific event to be replayed
-const replayResult = await subscription.replay("event-idem-123");
-console.log("Replay result:", replayResult);
+// Request a specific event to be replayed - returns data directly
+const eventData = await subscription.replay("event-idem-123");
+console.log("Event data:", eventData);
 
-// You can also provide an optional access key for verification
-const replayWithKeyResult = await subscription.replay("event-idem-123", "optional-access-key");
+// You can immediately work with the event data
+processEventData(eventData);
 ```
 
-The replay command returns an object with status information:
+The replay command returns the complete event object with its payload:
 
 ```javascript
 {
-  status: "success",
-  action: "replayed",
-  eventIdem: "event-idem-123",
-  timestamp: 1757778462158
+  eventName: "gms/ensync/third_party/payments/complete",
+  idem: "event-idem-123",
+  block: "81404",
+  metadata: {
+    persist: { isString: false, content: "true" },
+    headers: {},
+    $internal: {
+      replay_info: {
+        isReplayed: { isString: false, content: "true" },
+        replayTimestamp: { isString: false, content: "1758410511179" },
+        wasAcknowledged: { isString: false, content: "false" }
+      }
+    }
+  },
+  payload: { /* payload data */ },
+  loggedAt: 1757778462158,
+  recipient: "RECIPIENT_PUBLIC_KEY_BASE64",
+  isGroup: false
 }
+```
+
+**Direct Access vs Handler Processing:**
+
+Regular event subscription:
+
+```javascript
+// Events come through the handler asynchronously
+subscription.on(event => {
+  // Process event here
+  console.log("Received event:", event);
+});
+```
+
+Replay function:
+
+```javascript
+// Get event data directly and synchronously
+const event = await subscription.replay("event-idem-123");
+console.log("Retrieved event:", event);
 ```
 
 #### Deferring Events

@@ -17,8 +17,8 @@ const response = async () => {
 
     let eventCount = -1;
 
-    const replayResult = await subscription2.replay("eXNETssA19Nn");
-    console.log("Replay Result:", replayResult);
+    // const replayResult = await subscription2.replay("eXNETssA19Nn");
+    // console.log("Replay Result:", replayResult);
 
     subscription2.on(async (event) => {
       try {

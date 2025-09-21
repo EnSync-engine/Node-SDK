@@ -153,10 +153,12 @@ class EnSyncEngine {
      * @param {string[]} recipients - Array of base64 encoded public keys of recipients
      * @param {Object} payload - Event payload
      * @param {Object} metadata - Event metadata
-     * @returns {Promise<string>} Server response
+     * @param {Object} [options] - Additional options
+     * @param {boolean} [options.measurePerformance=false] - Whether to measure and return performance metrics
+     * @returns {Promise<Object>} Server response with optional performance metrics
      * @throws {EnSyncError} If publishing fails
      */
-    async publish(eventName, recipients = [], payload = {}, metadata = { persist: true, headers: {} }) {
+    async publish(eventName, recipients = [], payload = {}, metadata = { persist: true, headers: {} }, options = {}) {
         if (!this.#state.isAuthenticated) {
             throw new EnSyncError("Not authenticated", "EnSyncAuthError");
         }
@@ -169,18 +171,68 @@ class EnSyncEngine {
             throw new EnSyncError("recipients array cannot be empty", "EnSyncAuthError");
         }
 
+        const measurePerformance = options.measurePerformance || false;
+        const performanceMetrics = measurePerformance ? { encryption: [], network: [], total: [] } : null;
+        const startTotal = measurePerformance ? Date.now() : 0;
+
         try {
             const responses = [];
             // Encrypt and send for each recipient individually
             for (const recipient of recipients) {
+                // Measure encryption time
+                const startEncryption = measurePerformance ? Date.now() : 0;
+                
                 const encrypted = encryptEd25519(JSON.stringify(payload), naclUtil.decodeBase64(recipient));
                 const encryptedBase64 = naclUtil.encodeBase64(Buffer.from(JSON.stringify(encrypted)));
+                
+                if (measurePerformance) {
+                    const encryptionTime = Date.now() - startEncryption;
+                    performanceMetrics.encryption.push(encryptionTime);
+                }
 
+                // Measure network request time
+                const startNetwork = measurePerformance ? Date.now() : 0;
+                
                 const message = `PUB;CLIENT_ID=:${this.#config.clientId};EVENT_NAME=:${eventName};PAYLOAD=:${encryptedBase64};DELIVERY_TO=:${recipient};METADATA=:${JSON.stringify(metadata)}`;
                 const response = await this.#sendMessage(message);
+                
+                if (measurePerformance) {
+                    const networkTime = Date.now() - startNetwork;
+                    performanceMetrics.network.push(networkTime);
+                }
+                
                 responses.push(response);
             }
             
+            // Calculate total time if measuring performance
+            if (measurePerformance) {
+                const totalTime = Date.now() - startTotal;
+                performanceMetrics.total.push(totalTime);
+                
+                // Calculate averages
+                const calculateAverage = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+                
+                // Return response with performance metrics
+                return {
+                    response: responses.join(','),
+                    performance: {
+                        encryption: {
+                            times: performanceMetrics.encryption,
+                            average: calculateAverage(performanceMetrics.encryption),
+                            total: performanceMetrics.encryption.reduce((a, b) => a + b, 0)
+                        },
+                        network: {
+                            times: performanceMetrics.network,
+                            average: calculateAverage(performanceMetrics.network),
+                            total: performanceMetrics.network.reduce((a, b) => a + b, 0)
+                        },
+                        total: totalTime,
+                        recipients: recipients.length
+                    }
+                };
+            }
+            
+            // Return just the response string if not measuring performance
             return responses.join(',');
         } catch (error) {
             throw new EnSyncError(error, "EnSyncPublishError");
@@ -594,7 +646,7 @@ class EnSyncEngine {
             this.#messageCallbacks.set(messageId, { resolve, reject, timeout });
             
             if (this.#ws && this.#ws.readyState === WebSocket.OPEN) {
-                console.log("message", message)
+                // console.log("message", message)
                 this.#ws.send(message);
             } else {
                 clearTimeout(timeout);
@@ -640,14 +692,12 @@ class EnSyncEngine {
                             }
                             
                             // Call handler and properly await if it returns a Promise
-                            console.log(`${SERVICE_NAME} Executing handler for event ${processedEvent.eventName}`);
                             const result = handler(processedEvent);
                             if (result instanceof Promise) {
                                 await result.catch(error => {
                                     console.error(`${SERVICE_NAME} Async handler error -`, error);
                                 });
                             }
-                            console.log(`${SERVICE_NAME} Handler execution completed for event ${processedEvent.eventName}`);
                             
                             // Auto-acknowledge if enabled, AFTER handler completes
                             if (autoAck && processedEvent.idem && processedEvent.block) {
