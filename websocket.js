@@ -1,7 +1,14 @@
 const WebSocket = require('ws');
 const { EnSyncError, GENERIC_MESSAGE } = require("./error");
 const naclUtil = require('tweetnacl-util');
-const { encryptEd25519, decryptEd25519 } = require('./ecc-crypto');
+const { 
+    encryptEd25519, 
+    decryptEd25519, 
+    hybridEncrypt, 
+    hybridDecrypt, 
+    decryptMessageKey, 
+    decryptWithMessageKey 
+} = require('./ecc-crypto');
 
 const SERVICE_NAME = 'EnSync:';
 
@@ -154,8 +161,8 @@ class EnSyncEngine {
      * @param {Object} payload - Event payload
      * @param {Object} metadata - Event metadata
      * @param {Object} [options] - Additional options
-     * @param {boolean} [options.measurePerformance=false] - Whether to measure and return performance metrics
-     * @returns {Promise<Object>} Server response with optional performance metrics
+     * @param {boolean} [options.useHybridEncryption=true] - Whether to use hybrid encryption (default: true)
+     * @returns {Promise<string>} Server response
      * @throws {EnSyncError} If publishing fails
      */
     async publish(eventName, recipients = [], payload = {}, metadata = { persist: true, headers: {} }, options = {}) {
@@ -171,65 +178,48 @@ class EnSyncEngine {
             throw new EnSyncError("recipients array cannot be empty", "EnSyncAuthError");
         }
 
-        const measurePerformance = options.measurePerformance || false;
-        const performanceMetrics = measurePerformance ? { encryption: [], network: [], total: [] } : null;
-        const startTotal = measurePerformance ? Date.now() : 0;
+        const useHybridEncryption = options.useHybridEncryption !== false; // Default to true
 
         try {
             const responses = [];
-            // Encrypt and send for each recipient individually
-            for (const recipient of recipients) {
-                // Measure encryption time
-                const startEncryption = measurePerformance ? Date.now() : 0;
+            let encryptedPayloads = [];
+            
+            // Only use hybrid encryption when there are multiple recipients
+            if (useHybridEncryption && recipients.length > 1) {
+                // Use hybrid encryption (one encryption for all recipients)
+                const { encryptedPayload, encryptedKeys } = hybridEncrypt(JSON.stringify(payload), recipients);
                 
-                const encrypted = encryptEd25519(JSON.stringify(payload), naclUtil.decodeBase64(recipient));
-                const encryptedBase64 = naclUtil.encodeBase64(Buffer.from(JSON.stringify(encrypted)));
+                // Format for transmission: combine encrypted payload and keys
+                const hybridMessage = {
+                    type: 'hybrid',
+                    payload: encryptedPayload,
+                    keys: encryptedKeys
+                };
                 
-                if (measurePerformance) {
-                    const encryptionTime = Date.now() - startEncryption;
-                    performanceMetrics.encryption.push(encryptionTime);
-                }
-
-                // Measure network request time
-                const startNetwork = measurePerformance ? Date.now() : 0;
+                const encryptedBase64 = naclUtil.encodeBase64(Buffer.from(JSON.stringify(hybridMessage)));
                 
-                const message = `PUB;CLIENT_ID=:${this.#config.clientId};EVENT_NAME=:${eventName};PAYLOAD=:${encryptedBase64};DELIVERY_TO=:${recipient};METADATA=:${JSON.stringify(metadata)}`;
-                const response = await this.#sendMessage(message);
-                
-                if (measurePerformance) {
-                    const networkTime = Date.now() - startNetwork;
-                    performanceMetrics.network.push(networkTime);
-                }
-                
-                responses.push(response);
+                // Create one encrypted payload for all recipients
+                encryptedPayloads = recipients.map(recipient => ({
+                    recipient,
+                    encryptedBase64
+                }));
+            } else {
+                // Use traditional encryption (separate encryption for each recipient)
+                encryptedPayloads = recipients.map(recipient => {
+                    const encrypted = encryptEd25519(JSON.stringify(payload), naclUtil.decodeBase64(recipient));
+                    const encryptedBase64 = naclUtil.encodeBase64(Buffer.from(JSON.stringify(encrypted)));
+                    return {
+                        recipient,
+                        encryptedBase64
+                    };
+                });
             }
             
-            // Calculate total time if measuring performance
-            if (measurePerformance) {
-                const totalTime = Date.now() - startTotal;
-                performanceMetrics.total.push(totalTime);
-                
-                // Calculate averages
-                const calculateAverage = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
-                
-                // Return response with performance metrics
-                return {
-                    response: responses.join(','),
-                    performance: {
-                        encryption: {
-                            times: performanceMetrics.encryption,
-                            average: calculateAverage(performanceMetrics.encryption),
-                            total: performanceMetrics.encryption.reduce((a, b) => a + b, 0)
-                        },
-                        network: {
-                            times: performanceMetrics.network,
-                            average: calculateAverage(performanceMetrics.network),
-                            total: performanceMetrics.network.reduce((a, b) => a + b, 0)
-                        },
-                        total: totalTime,
-                        recipients: recipients.length
-                    }
-                };
+            // Send messages to all recipients
+            for (const { recipient, encryptedBase64 } of encryptedPayloads) {
+                const message = `PUB;CLIENT_ID=:${this.#config.clientId};EVENT_NAME=:${eventName};PAYLOAD=:${encryptedBase64};DELIVERY_TO=:${recipient};METADATA=:${JSON.stringify(metadata)}`;
+                const response = await this.#sendMessage(message);
+                responses.push(response);
             }
             
             // Return just the response string if not measuring performance
@@ -280,18 +270,18 @@ class EnSyncEngine {
      * @returns {Promise<Object>} Response object with status, action, eventId, delayMs, scheduledDelivery, and timestamp
      * @throws {EnSyncError} If event is not found, delay is invalid, or operation fails
      */
-    async #deferEvent(eventId, delayMs = 0, reason = "") {
+    async #deferEvent(eventId, eventName, delayMs = 0, reason = "") {
         if (!this.#state.isAuthenticated) {
             throw new EnSyncError("Not authenticated", "EnSyncAuthError");
         }
 
         // Validate delay range (1 second to 24 hours)
-        if (delayMs !== 0 && (delayMs < 1000 || delayMs > 24 * 60 * 60 * 1000)) {
+        if (delayMs < 1000 || delayMs > 24 * 60 * 60 * 1000) {
             throw new EnSyncError(INVALID_DELAY, "EnSyncValidationError");
         }
 
         try {
-            const message = `DEFER;CLIENT_ID=:${this.#config.clientId};EVENT_IDEM=:${eventId};DELAY=:${delayMs};REASON=:${reason}`;
+            const message = `DEFER;CLIENT_ID=:${this.#config.clientId};EVENT_IDEM=:${eventId};EVENT_NAME=:${eventName};DELAY=:${delayMs};REASON=:${reason}`;
             const response = await this.#sendMessage(message);
             
             if (response.startsWith("-FAIL")) {
@@ -420,7 +410,7 @@ class EnSyncEngine {
                 ack: (eventIdem, block) => this.#ack(eventIdem, block, eventName),
                 resume: () => this.#continueProcessing(eventName),
                 pause: (reason = "") => this.#pauseProcessing(eventName, reason),
-                defer: (eventIdem, delayMs, reason = "") => this.#deferEvent(eventIdem, delayMs, reason),
+                defer: (eventIdem, delayMs = 1000, reason = "") => this.#deferEvent(eventIdem, eventName, delayMs, reason),
                 discard: (eventIdem, reason = "") => this.#discardEvent(eventIdem, eventName, reason),
                 rollback: (eventIdem, block) => this.#rollback(eventIdem, block),
                 replay: (eventIdem) => this.#replay(eventIdem, eventName, options.appSecretKey),
@@ -497,7 +487,48 @@ class EnSyncEngine {
                 return { success: false };
             }
             
-            const payload = JSON.parse(decryptEd25519(eventData.encryptedPayload, decryptionKey));
+            // Parse the encrypted payload
+            let payload;
+            const encryptedData = eventData.encryptedPayload;
+            
+            // Check if this is a hybrid encrypted message
+            if (encryptedData && encryptedData.type === 'hybrid') {
+                // Handle hybrid encryption
+                const { payload: encryptedPayload, keys } = encryptedData;
+                
+                // For each recipient key, try to decrypt
+                let decrypted = false;
+                
+                // Get all recipient IDs from the keys object
+                const recipientIds = Object.keys(keys);
+                
+                for (const recipientId of recipientIds) {
+                    try {
+                        // Get the encrypted key for this recipient
+                        const encryptedKey = keys[recipientId];
+                        
+                        // Try to decrypt the message key using the appSecretKey
+                        const messageKey = decryptMessageKey(encryptedKey, decryptionKey);
+                        
+                        // If we got here, decryption succeeded
+                        // Now decrypt the payload with the message key
+                        payload = JSON.parse(decryptWithMessageKey(encryptedPayload, messageKey));
+                        decrypted = true;
+                        break; // Successfully decrypted, exit the loop
+                    } catch (error) {
+                        // This key didn't work, try the next one
+                        console.debug(`${SERVICE_NAME} Couldn't decrypt with recipient ID ${recipientId}: ${error.message}`);
+                    }
+                }
+                
+                if (!decrypted) {
+                    console.error(`${SERVICE_NAME} Failed to decrypt hybrid message with any of the ${recipientIds.length} recipient keys`);
+                    return { success: false };
+                }
+            } else {
+                // Handle traditional encryption
+                payload = JSON.parse(decryptEd25519(encryptedData, decryptionKey));
+            }
             
             // Remove encryptedPayload from eventData as it's no longer needed
             delete eventData.encryptedPayload;
@@ -567,6 +598,14 @@ class EnSyncEngine {
                 resolve();
             }
         });
+    }
+    
+    /**
+     * Gets the client's public key (client hash)
+     * @returns {string} The client's public key (base64 encoded)
+     */
+    getClientPublicKey() {
+        return this.#config.clientHash;
     }
 
     // Private methods
@@ -646,7 +685,6 @@ class EnSyncEngine {
             this.#messageCallbacks.set(messageId, { resolve, reject, timeout });
             
             if (this.#ws && this.#ws.readyState === WebSocket.OPEN) {
-                // console.log("message", message)
                 this.#ws.send(message);
             } else {
                 clearTimeout(timeout);
@@ -672,11 +710,9 @@ class EnSyncEngine {
         if (message.startsWith('+RECORD:')) {
             // Parse the message into event data
             const rawEventData = this.#parseEventMessage(message);
-            console.log(`${SERVICE_NAME} Received event for ${rawEventData?.eventName || 'unknown event'}`);
             
             if (rawEventData && this.#subscriptions.has(rawEventData.eventName)) {
                 const handlers = this.#subscriptions.get(rawEventData.eventName);
-                console.log(`${SERVICE_NAME} Found ${handlers.size} handler(s) for event ${rawEventData.eventName}`);
                 
                 // Process handlers sequentially to maintain order
                 for (const { handler, appSecretKey, autoAck } of handlers) {

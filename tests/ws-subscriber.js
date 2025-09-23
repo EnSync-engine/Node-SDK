@@ -27,14 +27,14 @@ const response = async () => {
         totalEventsReceived++;
         processedEvents.push(event.idem);
 
-        // if (eventCount === 2) {
-        //   // const pauseResult = await subscription2.pause("Pausing event");
-        //   // console.log("Pause Result:", pauseResult);
-        //   setTimeout(async () => {
-        //     // const continueResult = await subscription2.continue();
-        //     // console.log("Continue Result:", continueResult);
-        //   }, 5000);
-        // }
+        if (eventCount === 1) {
+          // const pauseResult = await subscription2.pause("Pausing event");
+          // console.log("Pause Result:", pauseResult);
+          const deferredResult = await subscription2.defer(event.idem, 1000, "Deferring second event");
+          console.log("Deferred Result:", deferredResult);
+          return
+        }
+
         // Defer 2nd event
         // if (eventCount === 1) {
         //   console.log("\nDeferring 2nd event...");
@@ -51,13 +51,13 @@ const response = async () => {
         // Discard 5th event
         // if (eventCount === 4) {
           // console.log("\nDiscarding event...");
-          const discardResult = await subscription2.discard(event.idem, "Discarding fifth event");
-          console.log("Discard Result:", discardResult);
+          // const deferredResult = await subscription2.defer(event.idem, 1000, "Discarding fifth event");
+          // console.log("Deferred Result:", deferredResult);
         //   return;
         // }
 
         // Acknowledge other events
-        // console.log("ACK", await subscription2.ack(event.idem, event.block));
+        console.log("ACK", await subscription2.ack(event.idem, event.block));
         totalEventsAcknowledged++;
       } catch (e) {
         console.log("Exception:", e);

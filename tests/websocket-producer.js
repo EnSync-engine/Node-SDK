@@ -36,33 +36,21 @@ const response = async () => {
 
     // Publish test events
     const eventName = process.env.EVENT_TO_PUBLISH;
-    for (let index = 0; index < 2; index++) {
-      console.log("index", index)
+    for (let index = 0; index < 3; index++) {
       const start = Date.now();
       try {
-        // Enable performance measurement
         const result = await client.publish(
           eventName, 
           [process.env.RECEIVER_IDENTIFICATION_NUMBER], 
           {
             "meter_per_seconds": Math.floor(Math.random() * 30),
           },
-          { persist: true, headers: {} },
-          { measurePerformance: true } // Enable performance measurement
+          { persist: true, headers: {} }
         );
         
         const end = Date.now();
         const duration = end - start;
         durations.push(duration);
-        
-        // Log the response and performance metrics
-        console.log("Response:", result.response);
-        console.log("Performance Metrics:");
-        console.log("  Encryption time (avg):", result.performance.encryption.average.toFixed(2), "ms");
-        console.log("  Network time (avg):", result.performance.network.average.toFixed(2), "ms");
-        console.log("  Total time:", result.performance.total, "ms");
-        console.log("  Encryption/Network ratio:", (result.performance.encryption.total / result.performance.network.total).toFixed(2));
-        console.log("Duration", duration, "ms", "index", index);
       } catch (error) {
         console.error(`Error publishing event ${index}:`, error);
       }

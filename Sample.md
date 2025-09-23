@@ -81,68 +81,90 @@ Returns a new EnSyncClient instance
 ### Publishing Events
 
 ```javascript
+// Basic publish
 await client.publish(
-  "event/name",           // Event name
-  ["recipient-id"],       // Recipients
-  { data: "payload" },     // Event payload
-  { persist: true, headers: {} }  // Metadata
+  "company/service/event-type",  // Event name
+  ["appId"],                   // Recipients (appIds of receiving parties)
+  { data: "your payload" }        // Event payload
+);
+
+// With optional parameters
+await client.publish(
+  "company/service/event-type",
+  ["appId"],                   // The appId of the receiving party
+  { data: "your payload" },
+  { persist: true, headers: { source: "order-system" } }
 );
 ```
 
 #### Publish Parameters
 
-- `eventName` (string): Name of the event to publish
-- `recipients` (array): Array of recipient IDs
-- `payload` (object): Event data payload
-- `metadata` (object, optional): Event metadata
-  - `persist` (boolean): Whether to persist the event (default: true)
-  - `headers` (object): Custom headers for the event
-- `options` (object, optional):
-  - `ttl` (number): Time-to-live in seconds (default: 3600)
+- `eventName`: Name of the event (e.g., "company/service/event-type")
+- `recipients`: Array of appIds (the appIds of receiving parties)
+- `payload`: Your event data (any JSON object)
+- `metadata`: (Optional) Control event persistence and add custom headers
 
 ---
 
 ### Subscribing to Events
 
 ```javascript
-const subscription = await client.subscribe(eventName, options);
+// Basic subscription
+const subscription = await client.subscribe("company/service/event-type");
+
+// Set up event handler
+subscription.on(event => {
+  console.log("Received event:", event.payload);
+  // Process the event
+});
+
+// With options
+const subscription = await client.subscribe("company/service/event-type", {
+  autoAck: false,  // Manual acknowledgment
+  appSecretKey: process.env.CUSTOM_DECRYPT_KEY  // Custom decryption key
+});
 ```
 
 #### Subscribe Parameters
 
-- `eventName` (string): Name of the event to subscribe to
-- `options` (object, optional):
-  - `appSecretKey` (string): Optional separate key to decrypt messages (if different from the default key)
-  - `autoAck` (boolean): Automatically acknowledge events (default: true)
-  - `fromTimestamp` (number): Subscribe from specific timestamp
+- `eventName`: Name of the event to subscribe to
+- `options`: (Optional)
+  - `autoAck`: Set to false for manual acknowledgment (default: true)
+  - `appSecretKey`: Custom decryption key for this subscription
 
-#### Subscribe Returns
+#### Subscription Methods
 
-Returns a subscription object with the following methods:
+```javascript
+// Handle incoming events
+subscription.on(event => { /* process event */ });
 
-```typescript
-{
-  on: (callback: (record: EnSyncEventPayload) => Promise<void>) => void;
-  ack: (eventId: string, block: string) => Promise<string>;
-  rollback: (eventId: string, block: string) => Promise<string>;
-  unsubscribe: () => Promise<string>;
-}
+// Manually acknowledge an event
+await subscription.ack(event.idem, event.block);
+
+// Request a specific event to be replayed
+const eventData = await subscription.replay("event-idem-123");
+
+// Stop receiving events
+await subscription.unsubscribe();
 ```
 
 ---
 
 ### Event Structure
 
+When you receive an event through a subscription handler, it contains:
+
 ```javascript
 {
-  id: "event-id",                // Unique event ID
-  block: "block-id",             // Block ID for acknowledgment
-  data: { /* payload */ },       // User-defined payload
-  timestamp: 1634567890123,      // Event timestamp
-  metadata: {                    // Metadata object
-    sender: "sender-id"          // Sender client ID (if available)
+  idem: "abc123",                // Unique event ID (use with ack/discard/replay)
+  block: "456",                  // Block ID (use with ack)
+  eventName: "company/service/event-type",  // Event name
+  payload: { /* your data */ },  // Your decrypted data
+  timestamp: 1634567890123,      // Event timestamp (milliseconds)
+  metadata: {                    // Optional metadata
+    headers: { /* custom headers */ }
   },
-  eventName: "event/name"        // Name of the event
+  recipient: "appId"            // The appId of the receiving party
 }
 ```
 
@@ -151,12 +173,12 @@ Returns a subscription object with the following methods:
 ### Closing Connections
 
 ```javascript
-await client.destroy(stopEngine)
+// Close just this client
+await client.close();
+
+// Close client and engine (if you have no other clients)
+await client.close(true);
 ```
-
-#### Destroy Parameters
-
-- `stopEngine` (boolean, optional): If true, also closes the underlying engine connection. Set to false to keep the engine running for other clients. (default: false)
 
 ---
 
@@ -195,171 +217,112 @@ Common error types:
 
 ## Complete Examples
 
-### Event Producer
-
-Example of publishing events:
+### Quick Start
 
 ```javascript
-// Load environment variables (recommended for sensitive keys)
 require('dotenv').config();
 const { EnSyncEngine } = require('ensync-client-sdk');
 
-async function publishExample() {
+async function quickStart() {
   try {
-    // Initialize the EnSync engine with connection options
-    const engine = new EnSyncEngine("https://node.gms.ensync.cloud", {
-      pingInterval: 15000, // 15 seconds
-      reconnectInterval: 3000, // 3 seconds
-      maxReconnectAttempts: 3
+    // 1. Initialize engine and create client
+    const engine = new EnSyncEngine("wss://node.ensync.cloud");
+    const client = await engine.createClient(process.env.ENSYNC_APP_KEY, {
+      appSecretKey: process.env.ENSYNC_SECRET_KEY
     });
 
-    // Create a client using your app key
-    const client = await engine.createClient(process.env.ENSYNC_APP_KEY);
-    console.log('Successfully created and authenticated EnSync client');
+    // 2. Publish an event
+    await client.publish(
+      "orders/status/updated",
+      ["appId"],  // The appId of the receiving party
+      { orderId: "order-123", status: "completed" }
+    );
 
-    // Define event name and recipient(s)
-    const eventName = "company/service/event-type";
-    const recipients = ["recipient-public-key"];
+    // 3. Subscribe to events
+    const subscription = await client.subscribe("orders/status/updated");
     
-    // Define the payload (any JSON-serializable object)
-    const payload = {
-      orderId: "order-123",
-      status: "completed",
-      timestamp: Date.now()
-    };
-    
-    // Optional metadata
-    const metadata = {
-      persist: true,
-      headers: { source: "order-system" }
-    };
+    // 4. Handle incoming events
+    subscription.on(event => {
+      console.log(`Received order update: ${event.payload.orderId} is ${event.payload.status}`);
+      // Process event...
+    });
 
-    // Publish the event
-    const response = await client.publish(eventName, recipients, payload, metadata);
-    console.log("Publish response:", response);
-    
-    // Close the connection when done
-    await client.close();
+    // 5. Clean up when done
+    process.on('SIGINT', async () => {
+      await subscription.unsubscribe();
+      await client.close();
+      process.exit(0);
+    });
   } catch (error) {
     console.error('Error:', error.message);
   }
 }
 
-publishExample();
+quickStart();
 ```
 
----
-
-### Event Subscriber
-
-Example of subscribing to events:
+### Publishing Example
 
 ```javascript
-// Load environment variables (recommended for sensitive keys)
-require('dotenv').config();
-const { EnSyncEngine } = require("ensync-client-sdk");
+// Create client
+const engine = new EnSyncEngine("wss://node.ensync.cloud");
+const client = await engine.createClient(process.env.ENSYNC_APP_KEY);
 
-async function subscribeExample() {
+// Basic publish
+const result = await client.publish(
+  "notifications/email/sent",
+  ["appId"],  // The appId of the receiving party
+  { to: "user@example.com", subject: "Welcome!" }
+);
+
+// With performance metrics
+const resultWithMetrics = await client.publish(
+  "notifications/email/sent",
+  ["appId"],  // The appId of the receiving party
+  { to: "user@example.com", subject: "Welcome!" },
+  { persist: true },
+  { measurePerformance: true }
+);
+
+console.log(`Encryption took ${resultWithMetrics.performance.encryption.average}ms`);
+console.log(`Network took ${resultWithMetrics.performance.network.average}ms`);
+```
+
+### Subscribing Example
+
+```javascript
+// Create client with decryption key
+const client = await engine.createClient(process.env.ENSYNC_APP_KEY, {
+  appSecretKey: process.env.ENSYNC_SECRET_KEY
+});
+
+// Subscribe with manual acknowledgment
+const subscription = await client.subscribe("payments/completed", { autoAck: false });
+
+// Handle events
+subscription.on(async (event) => {
   try {
-    // Initialize the EnSync engine
-    const engine = new EnSyncEngine("https://node.gms.ensync.cloud", { 
-      disableTls: false,
-      reconnectInterval: 5000,
-      maxReconnectAttempts: 5
-    });
+    // Process the payment
+    await updateOrderStatus(event.payload.orderId, "paid");
     
-    // Create a client with optional decryption key
-    const client = await engine.createClient(
-      process.env.ENSYNC_APP_KEY, 
-      { appSecretKey: process.env.ENSYNC_SECRET_KEY }
-    );
-
-    // Subscribe to an event
-    const eventName = "company/service/event-type";
-    const subscription = await client.subscribe(eventName, { 
-      autoAck: false, // Set to true for automatic acknowledgment
-      appSecretKey: process.env.ENSYNC_SECRET_KEY // Optional separate key for this subscription
-    });
-
-    // Set up event handler
-    subscription.on(async (event) => {
-      try {
-        console.log("Event received:", {
-          id: event.idem,
-          name: event.eventName,
-          data: event.payload,
-          timestamp: new Date(event.timestamp).toISOString()
-        });
-        
-        // Process the event
-        await processEvent(event);
-        
-        // Example: Pause subscription after processing an event
-        if (shouldPauseProcessing(event)) {
-          const pauseResult = await subscription.pause("Pausing for maintenance");
-          console.log("Subscription paused:", pauseResult);
-          
-          // Continue after some time
-          setTimeout(async () => {
-            const continueResult = await subscription.continue();
-            console.log("Subscription continued:", continueResult);
-          }, 5000);
-        }
-        
-        // Example: Defer an event that needs later processing
-        if (needsDeferring(event)) {
-          await subscription.defer(event.idem, 10000, "Resource not ready");
-          return; // Skip acknowledgment as we're deferring
-        }
-        
-        // Example: Discard invalid events
-        if (isInvalidEvent(event)) {
-          await subscription.discard(event.idem, "Invalid data format");
-          return; // Skip acknowledgment as we're discarding
-        }
-
-        // Manually acknowledge the event when processed successfully
-        await subscription.ack(event.idem, event.block);
-      } catch (error) {
-        console.error("Error processing event:", error);
-      }
-    });
-    
-    // Handle graceful shutdown
-    process.on('SIGINT', async () => {
-      console.log('Closing connection...');
-      await subscription.unsubscribe();
-      await client.close();
-      process.exit(0);
-    });
-    
-    // Example helper functions (implement these based on your needs)
-    function processEvent(event) {
-      // Process the event data
-      return Promise.resolve();
+    // Get historical data if needed
+    if (needsHistory(event.payload.orderId)) {
+      const history = await subscription.replay(event.payload.previousEventId);
+      console.log("Previous payment:", history);
     }
     
-    function shouldPauseProcessing(event) {
-      // Logic to determine if processing should be paused
-      return false;
-    }
-    
-    function needsDeferring(event) {
-      // Logic to determine if event should be deferred
-      return false;
-    }
-    
-    function isInvalidEvent(event) {
-      // Validation logic
-      return false;
-    }
-
+    // Acknowledge successful processing
+    await subscription.ack(event.idem, event.block);
   } catch (error) {
-    console.error("Error:", error.message);
+    // Defer processing if temporary error
+    if (isTemporaryError(error)) {
+      await subscription.defer(event.idem, 60000, "Temporary processing error");
+    } else {
+      // Discard if permanent error
+      await subscription.discard(event.idem, "Invalid payment data");
+    }
   }
-}
-
-subscribeExample();
+});
 ```
 
 ---
