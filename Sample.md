@@ -4,7 +4,7 @@
 
 ## Full Documentation
 
-This is the client SDK for [EnSync engine](https://ensync.cloud) (message delivery engine) that enables you to build an ecosystem of connected devices and services.
+This is the client [SDK](https://www.npmjs.com/package/ensync-client-sdk) for [EnSync engine](https://ensync.cloud) (message delivery engine) that enables you to build an ecosystem of connected devices and services.
 
 ---
 
@@ -18,36 +18,55 @@ npm install ensync-client-sdk
 
 ## Usage
 
-### Transport Options
-
-The EnSync SDK supports two transport protocols:
-
-- **gRPC (Default)** - High-performance binary protocol with HTTP/2, ideal for server-to-server communication
-- **WebSocket** - Real-time bidirectional communication, great for browser and Node.js applications
-
 ### Importing
 
+#### Default (gRPC)
+
 ```javascript
-// CommonJS - gRPC (Default)
-const { EnSyncEngine } = require("ensync-client-sdk");
+// Import the default engine class (gRPC)
+const { EnSyncEngine } = require('ensync-client-sdk');
 
-// Explicitly use gRPC
-const { EnSyncEngine } = require("ensync-client-sdk/grpc");
+// Production - uses secure TLS on port 443 by default
+const engine = new EnSyncEngine("grpcs://node.ensync.cloud");
 
-// Use WebSocket instead
-const { EnSyncEngine } = require("ensync-client-sdk/websocket");
+// Development - uses insecure connection on port 50051 by default
+// const engine = new EnSyncEngine("localhost");
 
-// ES Modules
-import { EnSyncEngine } from "ensync-client-sdk"; // gRPC by default
+// Create authenticated client
+const client = await engine.createClient("your-app-key");
 ```
+
+#### WebSocket Alternative
+
+```javascript
+// Import the WebSocket engine class
+const { EnSyncEngine } = require('ensync-client-sdk/websocket');
+
+// Initialize WebSocket client
+const engine = new EnSyncEngine("wss://node.ensync.cloud");
+const client = await engine.createClient("your-app-key");
+```
+
+Both clients provide the same API for publishing and subscribing to events.
+
+**gRPC Connection Options:**
+
+- Production URLs automatically use secure TLS (port 443)
+- `localhost` automatically uses insecure connection (port 50051)
+- Explicit protocols: `grpcs://` (secure) or `grpc://` (insecure)
+- Custom ports: `node.ensync.cloud:9090`
 
 ---
 
 ## API Reference
 
-### EnSyncEngine
+### EnSyncEngine (gRPC - Default)
 
-The main class that manages connections and client creation for the EnSync system.
+The main class that manages gRPC connections and client creation for the EnSync system. This is the default and recommended client for production use.
+
+### EnSyncWebSocketEngine (WebSocket - Alternative)
+
+An alternative class that manages WebSocket connections and client creation for the EnSync system.
 
 ```javascript
 const engine = new EnSyncEngine(url, options);
@@ -55,28 +74,19 @@ const engine = new EnSyncEngine(url, options);
 
 #### Parameters
 
-**For gRPC (Default):**
+| Parameter | Type     | Required | Description                      |
+| --------- | -------- | -------- | -------------------------------- |
+| `url`     | `string` | Yes      | The URL of the EnSync server     |
+| `options` | `object` | No       | Configuration options            |
 
-- `url` (string): The gRPC server address
-  - Use `grpc://` for insecure connections (e.g., `grpc://localhost:50051`)
-  - Use `grpcs://` for secure TLS connections (e.g., `grpcs://node.ensync.cloud:50051`)
-- `options` (object, optional):
-  - `heartbeatInterval` (number): Heartbeat interval in ms (default: 30000)
-  - `maxReconnectAttempts` (number): Maximum reconnection attempts (default: 5)
+**Options Object:**
 
-**For WebSocket:**
-
-- `url` (string): The WebSocket URL (e.g., `ws://localhost:8082` or `wss://node.ensync.cloud`)
-- `options` (object, optional):
-  - `pingInterval` (number): Ping interval in ms (default: 30000)
-  - `reconnectInterval` (number): Reconnection interval in ms (default: 5000)
-  - `maxReconnectAttempts` (number): Maximum reconnection attempts (default: 5)
-
-#### Events
-
-- `error`: Emitted when an error occurs
-- `connect`: Emitted when connection is established
-- `disconnect`: Emitted when connection is closed
+| Option                   | Type     | Default | Description                                |
+| ------------------------ | -------- | ------- | ------------------------------------------ |
+| `heartbeatInterval`      | `number` | `30000` | Heartbeat interval in ms (gRPC)            |
+| `pingInterval`           | `number` | `30000` | Ping interval in ms (WebSocket)            |
+| `reconnectInterval`      | `number` | `5000`  | Reconnection interval in ms                |
+| `maxReconnectAttempts`   | `number` | `5`     | Maximum reconnection attempts              |
 
 ---
 
@@ -86,19 +96,29 @@ const engine = new EnSyncEngine(url, options);
 - Create a client with your app key
 
 ```javascript
-const engine = new EnSyncEngine("https://node.gms.ensync.cloud");
+// Initialize the engine (gRPC with TLS)
+const engine = new EnSyncEngine("grpcs://node.gms.ensync.cloud");
+
+// Create a client
 const client = await engine.createClient("your-app-key");
 ```
 
-#### Client Parameters
+#### Client Creation Parameters
 
-- `appKey` (string): Your EnSync application key
-- `options` (object, optional):
-  - `appSecretKey` (string): Default key used to decrypt incoming messages
+| Parameter | Type     | Required | Description                      |
+| --------- | -------- | -------- | -------------------------------- |
+| `appKey`  | `string` | Yes      | Your EnSync application key      |
+| `options` | `object` | No       | Client configuration options     |
+
+**Options Object:**
+
+| Option          | Type     | Default | Description                                    |
+| --------------- | -------- | ------- | ---------------------------------------------- |
+| `appSecretKey`  | `string` | `null`  | Default key used to decrypt incoming messages  |
 
 #### Client Returns
 
-Returns a new EnSyncClient instance
+Returns a new `EnSyncClient` instance
 
 ---
 
@@ -107,15 +127,15 @@ Returns a new EnSyncClient instance
 ```javascript
 // Basic publish
 await client.publish(
-  "company/service/event-type",  // Event name
-  ["appId"],                   // Recipients (appIds of receiving parties)
-  { data: "your payload" }        // Event payload
+  "company/service/event-type", // Event name
+  ["appId"], // Recipients (appIds of receiving parties)
+  { data: "your payload" } // Event payload
 );
 
 // With optional parameters
 await client.publish(
   "company/service/event-type",
-  ["appId"],                   // The appId of the receiving party
+  ["appId"], // The appId of the receiving party
   { data: "your payload" },
   { persist: true, headers: { source: "order-system" } }
 );
@@ -123,10 +143,19 @@ await client.publish(
 
 #### Publish Parameters
 
-- `eventName`: Name of the event (e.g., "company/service/event-type")
-- `recipients`: Array of appIds (the appIds of receiving parties)
-- `payload`: Your event data (any JSON object)
-- `metadata`: (Optional) Control event persistence and add custom headers
+| Parameter   | Type       | Required | Description                                              |
+| ----------- | ---------- | -------- | -------------------------------------------------------- |
+| `eventName` | `string`   | Yes      | Name of the event (e.g., "company/service/event-type")   |
+| `recipients`| `string[]` | Yes      | Array of appIds (the appIds of receiving parties)        |
+| `payload`   | `object`   | Yes      | Your event data (any JSON-serializable object)           |
+| `metadata`  | `object`   | No       | Control event persistence and add custom headers         |
+
+**Metadata Object:**
+
+| Option    | Type      | Default | Description                                    |
+| --------- | --------- | ------- | ---------------------------------------------- |
+| `persist` | `boolean` | `false` | Whether to persist the event on the server     |
+| `headers` | `object`  | `{}`    | Custom headers to include with the event       |
 
 ---
 
@@ -137,7 +166,7 @@ await client.publish(
 const subscription = await client.subscribe("company/service/event-type");
 
 // Set up event handler
-subscription.on(event => {
+subscription.on(async (event) => {
   console.log("Received event:", event.payload);
   // Process the event
 });
@@ -151,16 +180,27 @@ const subscription = await client.subscribe("company/service/event-type", {
 
 #### Subscribe Parameters
 
-- `eventName`: Name of the event to subscribe to
-- `options`: (Optional)
-  - `autoAck`: Set to false for manual acknowledgment (default: true)
-  - `appSecretKey`: Custom decryption key for this subscription
+| Parameter   | Type     | Required | Description                          |
+| ----------- | -------- | -------- | ------------------------------------ |
+| `eventName` | `string` | Yes      | Name of the event to subscribe to    |
+| `options`   | `object` | No       | Subscription options                 |
+
+**Options Object:**
+
+| Option          | Type      | Default | Description                                    |
+| --------------- | --------- | ------- | ---------------------------------------------- |
+| `autoAck`       | `boolean` | `true`  | Set to false for manual acknowledgment        |
+| `appSecretKey`  | `string`  | `null`  | Custom decryption key for this subscription    |
 
 #### Subscription Methods
 
 ```javascript
 // Handle incoming events
-subscription.on(event => { /* process event */ });
+async function handleEvent(event) {
+  // process event
+}
+
+subscription.on(handleEvent);
 
 // Manually acknowledge an event
 await subscription.ack(event.idem, event.block);
@@ -232,10 +272,12 @@ try {
 
 Common error types:
 
-- `EnSyncConnectionError`: Connection or authentication issues
-- `EnSyncPublishError`: Problems publishing events
-- `EnSyncSubscriptionError`: Subscription-related errors
-- `EnSyncGenericError`: Other errors
+| Error Type                  | Description                          |
+| --------------------------- | ------------------------------------ |
+| `EnSyncConnectionError`     | Connection or authentication issues  |
+| `EnSyncPublishError`        | Problems publishing events           |
+| `EnSyncSubscriptionError`   | Subscription-related errors          |
+| `EnSyncGenericError`        | Other errors                         |
 
 ---
 
@@ -244,8 +286,8 @@ Common error types:
 ### Quick Start (gRPC - Default)
 
 ```javascript
-require('dotenv').config();
-const { EnSyncEngine } = require('ensync-client-sdk');
+require("dotenv").config();
+const { EnSyncEngine } = require("ensync-client-sdk");
 
 async function quickStart() {
   try {
@@ -253,77 +295,83 @@ async function quickStart() {
     // Use grpc:// for insecure or grpcs:// for secure TLS connection
     const engine = new EnSyncEngine("grpc://localhost:50051");
     const client = await engine.createClient(process.env.ENSYNC_APP_KEY, {
-      appSecretKey: process.env.ENSYNC_SECRET_KEY
+      appSecretKey: process.env.ENSYNC_SECRET_KEY,
     });
 
     // 2. Publish an event
     await client.publish(
       "orders/status/updated",
-      ["appId"],  // The appId of the receiving party
+      ["appId"], // The appId of the receiving party
       { orderId: "order-123", status: "completed" }
     );
 
     // 3. Subscribe to events
     const subscription = await client.subscribe("orders/status/updated");
-    
+
     // 4. Handle incoming events
-    subscription.on(event => {
+    subscription.on((event) => {
       console.log(`Received order update: ${event.payload.orderId} is ${event.payload.status}`);
       // Process event...
     });
 
     // 5. Clean up when done
-    process.on('SIGINT', async () => {
+    process.on("SIGINT", async () => {
       await subscription.unsubscribe();
       await client.close();
       process.exit(0);
     });
   } catch (error) {
-    console.error('Error:', error.message);
+    console.error("Error:", error.message);
   }
 }
 
 quickStart();
 ```
 
+> **Note:** This example uses environment variables for security. Create a `.env` file with:
+> ```
+> ENSYNC_APP_KEY=your_app_key_here
+> ENSYNC_SECRET_KEY=your_secret_key_here
+> ```
+
 ### Quick Start (WebSocket)
 
 ```javascript
-require('dotenv').config();
-const { EnSyncEngine } = require('ensync-client-sdk/websocket');
+require("dotenv").config();
+const { EnSyncEngine } = require("ensync-client-sdk/websocket");
 
 async function quickStart() {
   try {
     // 1. Initialize engine and create client (WebSocket)
     const engine = new EnSyncEngine("wss://node.ensync.cloud");
     const client = await engine.createClient(process.env.ENSYNC_APP_KEY, {
-      appSecretKey: process.env.ENSYNC_SECRET_KEY
+      appSecretKey: process.env.ENSYNC_SECRET_KEY,
     });
 
     // 2. Publish an event
     await client.publish(
       "orders/status/updated",
-      ["appId"],  // The appId of the receiving party
+      ["appId"], // The appId of the receiving party
       { orderId: "order-123", status: "completed" }
     );
 
     // 3. Subscribe to events
     const subscription = await client.subscribe("orders/status/updated");
-    
+
     // 4. Handle incoming events
-    subscription.on(event => {
+    subscription.on((event) => {
       console.log(`Received order update: ${event.payload.orderId} is ${event.payload.status}`);
       // Process event...
     });
 
     // 5. Clean up when done
-    process.on('SIGINT', async () => {
+    process.on("SIGINT", async () => {
       await subscription.unsubscribe();
       await client.close();
       process.exit(0);
     });
   } catch (error) {
-    console.error('Error:', error.message);
+    console.error("Error:", error.message);
   }
 }
 
@@ -340,14 +388,14 @@ const client = await engine.createClient(process.env.ENSYNC_APP_KEY);
 // Basic publish
 const result = await client.publish(
   "notifications/email/sent",
-  ["appId"],  // The appId of the receiving party
+  ["appId"], // The appId of the receiving party
   { to: "user@example.com", subject: "Welcome!" }
 );
 
 // With performance metrics
 const resultWithMetrics = await client.publish(
   "notifications/email/sent",
-  ["appId"],  // The appId of the receiving party
+  ["appId"], // The appId of the receiving party
   { to: "user@example.com", subject: "Welcome!" },
   { persist: true },
   { measurePerformance: true }
@@ -362,7 +410,7 @@ console.log(`Network took ${resultWithMetrics.performance.network.average}ms`);
 ```javascript
 // Create client with decryption key
 const client = await engine.createClient(process.env.ENSYNC_APP_KEY, {
-  appSecretKey: process.env.ENSYNC_SECRET_KEY
+  appSecretKey: process.env.ENSYNC_SECRET_KEY,
 });
 
 // Subscribe with manual acknowledgment
@@ -373,13 +421,13 @@ subscription.on(async (event) => {
   try {
     // Process the payment
     await updateOrderStatus(event.payload.orderId, "paid");
-    
+
     // Get historical data if needed
     if (needsHistory(event.payload.orderId)) {
       const history = await subscription.replay(event.payload.previousEventId);
       console.log("Previous payment:", history);
     }
-    
+
     // Acknowledge successful processing
     await subscription.ack(event.idem, event.block);
   } catch (error) {
@@ -406,18 +454,18 @@ subscription.on(async (event) => {
 
 ```javascript
 // Using environment variables for sensitive keys
-require('dotenv').config();
+require("dotenv").config();
 
 const engine = new EnSyncEngine(process.env.ENSYNC_URL);
 const client = await engine.createClient(process.env.ENSYNC_APP_KEY);
 
 // Implement proper error handling and reconnection
-engine.on('disconnect', () => {
-  console.log('Connection lost, will reconnect automatically');
+engine.on("disconnect", () => {
+  console.log("Connection lost, will reconnect automatically");
 });
 
 // Close connections when done
-process.on('SIGINT', async () => {
+process.on("SIGINT", async () => {
   await client.destroy(true);
   process.exit(0);
 });
@@ -431,17 +479,13 @@ process.on('SIGINT', async () => {
 
 ```javascript
 // Good event naming pattern
-await client.publish(
-  "inventory/product/created",
-  ["warehouse-service"],
-  {
-    productId: "prod-123",
-    name: "Ergonomic Chair",
-    sku: "ERG-CH-BLK",
-    price: 299.99,
-    createdAt: Date.now()
-  }
-);
+await client.publish("inventory/product/created", ["warehouse-service"], {
+  productId: "prod-123",
+  name: "Ergonomic Chair",
+  sku: "ERG-CH-BLK",
+  price: 299.99,
+  createdAt: Date.now(),
+});
 ```
 
 ### Security Best Practices
@@ -519,7 +563,7 @@ Regular event subscription:
 
 ```javascript
 // Events come through the handler asynchronously
-subscription.on(event => {
+subscription.on((event) => {
   // Process event here
   console.log("Received event:", event);
 });
@@ -545,8 +589,8 @@ The defer method allows you to postpone processing of an event for a specified p
 ```javascript
 // Defer an event for 5 seconds (5000ms)
 const deferResult = await subscription.defer(
-  "event-idem-123",  // Event ID
-  5000,               // Delay in milliseconds
+  "event-idem-123", // Event ID
+  5000, // Delay in milliseconds
   "Waiting for resources to be available" // Optional reason
 );
 console.log("Defer result:", deferResult);
@@ -580,7 +624,7 @@ The discard method allows you to permanently reject an event without processing 
 ```javascript
 // Discard an event permanently
 const discardResult = await subscription.discard(
-  "event-idem-123",  // Event ID
+  "event-idem-123", // Event ID
   "Invalid data format" // Optional reason
 );
 console.log("Discard result:", discardResult);
@@ -623,7 +667,7 @@ console.log("Subscription continued - now receiving events again");
 async function processInBatches(events) {
   // Pause subscription while processing a batch
   await subscription.pause();
-  
+
   try {
     // Process events without receiving new ones
     for (const event of events) {

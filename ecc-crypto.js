@@ -1,9 +1,9 @@
 // EdDSA-compatible public key encryption using Ed25519 keys (converted to X25519 for ECDH), with symmetric encryption (XSalsa20-Poly1305)
 // Requires 'tweetnacl' and 'tweetnacl-util'
 
-const nacl = require('tweetnacl');
-const naclUtil = require('tweetnacl-util');
-const ed2curve = require('ed2curve');
+const nacl = require("tweetnacl");
+const naclUtil = require("tweetnacl-util");
+const ed2curve = require("ed2curve");
 
 /**
  * Converts an Ed25519 key (32-byte Uint8Array) to an X25519 key (for ECDH)
@@ -24,9 +24,10 @@ function ed25519SecretKeyToCurve25519(ed25519SecretKey) {
  */
 function encryptEd25519(message, recipientEd25519PublicKey) {
   // Convert base64 key to Uint8Array if needed
-  const publicKeyBytes = typeof recipientEd25519PublicKey === 'string' 
-    ? naclUtil.decodeBase64(recipientEd25519PublicKey)
-    : recipientEd25519PublicKey;
+  const publicKeyBytes =
+    typeof recipientEd25519PublicKey === "string"
+      ? naclUtil.decodeBase64(recipientEd25519PublicKey)
+      : recipientEd25519PublicKey;
   // Generate ephemeral key pair for sender
   const ephemeralKeyPair = nacl.box.keyPair();
   // Convert recipient Ed25519 public key to X25519
@@ -43,7 +44,7 @@ function encryptEd25519(message, recipientEd25519PublicKey) {
   return {
     nonce: naclUtil.encodeBase64(nonce),
     ciphertext: naclUtil.encodeBase64(ciphertext),
-    ephemeralPublicKey: naclUtil.encodeBase64(ephemeralKeyPair.publicKey)
+    ephemeralPublicKey: naclUtil.encodeBase64(ephemeralKeyPair.publicKey),
   };
 }
 
@@ -55,9 +56,10 @@ function encryptEd25519(message, recipientEd25519PublicKey) {
  */
 function decryptEd25519(encrypted, recipientEd25519SecretKey) {
   // Convert base64 key to Uint8Array if needed
-  const secretKeyBytes = typeof recipientEd25519SecretKey === 'string'
-    ? naclUtil.decodeBase64(recipientEd25519SecretKey)
-    : recipientEd25519SecretKey;
+  const secretKeyBytes =
+    typeof recipientEd25519SecretKey === "string"
+      ? naclUtil.decodeBase64(recipientEd25519SecretKey)
+      : recipientEd25519SecretKey;
   const nonce = naclUtil.decodeBase64(encrypted.nonce);
   const ciphertext = naclUtil.decodeBase64(encrypted.ciphertext);
   const ephemeralPublicKey = naclUtil.decodeBase64(encrypted.ephemeralPublicKey);
@@ -71,7 +73,7 @@ function decryptEd25519(encrypted, recipientEd25519SecretKey) {
     ephemeralPublicKey,
     recipientCurve25519SecretKey
   );
-  if (!plaintext) throw new Error('Failed to decrypt: authentication failed');
+  if (!plaintext) throw new Error("Failed to decrypt: authentication failed");
   return naclUtil.encodeUTF8(plaintext);
 }
 
@@ -91,14 +93,10 @@ function generateMessageKey() {
  */
 function encryptWithMessageKey(message, messageKey) {
   const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
-  const ciphertext = nacl.secretbox(
-    naclUtil.decodeUTF8(message),
-    nonce,
-    messageKey
-  );
+  const ciphertext = nacl.secretbox(naclUtil.decodeUTF8(message), nonce, messageKey);
   return {
     nonce: naclUtil.encodeBase64(nonce),
-    ciphertext: naclUtil.encodeBase64(ciphertext)
+    ciphertext: naclUtil.encodeBase64(ciphertext),
   };
 }
 
@@ -111,13 +109,9 @@ function encryptWithMessageKey(message, messageKey) {
 function decryptWithMessageKey(encrypted, messageKey) {
   const nonce = naclUtil.decodeBase64(encrypted.nonce);
   const ciphertext = naclUtil.decodeBase64(encrypted.ciphertext);
-  
-  const plaintext = nacl.secretbox.open(
-    ciphertext,
-    nonce,
-    messageKey
-  );
-  if (!plaintext) throw new Error('Failed to decrypt: authentication failed');
+
+  const plaintext = nacl.secretbox.open(ciphertext, nonce, messageKey);
+  if (!plaintext) throw new Error("Failed to decrypt: authentication failed");
   return naclUtil.encodeUTF8(plaintext);
 }
 
@@ -129,19 +123,20 @@ function decryptWithMessageKey(encrypted, messageKey) {
  */
 function encryptMessageKey(messageKey, recipientEd25519PublicKey) {
   // Convert base64 key to Uint8Array if needed
-  const publicKeyBytes = typeof recipientEd25519PublicKey === 'string' 
-    ? naclUtil.decodeBase64(recipientEd25519PublicKey)
-    : recipientEd25519PublicKey;
-  
+  const publicKeyBytes =
+    typeof recipientEd25519PublicKey === "string"
+      ? naclUtil.decodeBase64(recipientEd25519PublicKey)
+      : recipientEd25519PublicKey;
+
   // Generate ephemeral key pair for sender
   const ephemeralKeyPair = nacl.box.keyPair();
-  
+
   // Convert recipient Ed25519 public key to X25519
   const recipientCurve25519PublicKey = ed25519PublicKeyToCurve25519(publicKeyBytes);
-  
+
   // Generate random nonce
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
-  
+
   // Encrypt the message key
   const encryptedKey = nacl.box(
     messageKey,
@@ -149,11 +144,11 @@ function encryptMessageKey(messageKey, recipientEd25519PublicKey) {
     recipientCurve25519PublicKey,
     ephemeralKeyPair.secretKey
   );
-  
+
   return {
     nonce: naclUtil.encodeBase64(nonce),
     encryptedKey: naclUtil.encodeBase64(encryptedKey),
-    ephemeralPublicKey: naclUtil.encodeBase64(ephemeralKeyPair.publicKey)
+    ephemeralPublicKey: naclUtil.encodeBase64(ephemeralKeyPair.publicKey),
   };
 }
 
@@ -165,14 +160,15 @@ function encryptMessageKey(messageKey, recipientEd25519PublicKey) {
  */
 function decryptMessageKey(encryptedKey, recipientEd25519SecretKey) {
   // Convert base64 key to Uint8Array if needed
-  const secretKeyBytes = typeof recipientEd25519SecretKey === 'string'
-    ? naclUtil.decodeBase64(recipientEd25519SecretKey)
-    : recipientEd25519SecretKey;
-  
+  const secretKeyBytes =
+    typeof recipientEd25519SecretKey === "string"
+      ? naclUtil.decodeBase64(recipientEd25519SecretKey)
+      : recipientEd25519SecretKey;
+
   const nonce = naclUtil.decodeBase64(encryptedKey.nonce);
   const encryptedKeyBytes = naclUtil.decodeBase64(encryptedKey.encryptedKey);
   const ephemeralPublicKey = naclUtil.decodeBase64(encryptedKey.ephemeralPublicKey);
-  
+
   // Convert recipient Ed25519 secret key to X25519
   const recipientCurve25519SecretKey = ed25519SecretKeyToCurve25519(secretKeyBytes);
 
@@ -183,8 +179,8 @@ function decryptMessageKey(encryptedKey, recipientEd25519SecretKey) {
     ephemeralPublicKey,
     recipientCurve25519SecretKey
   );
-  
-  if (!messageKey) throw new Error('Failed to decrypt message key: authentication failed');
+
+  if (!messageKey) throw new Error("Failed to decrypt message key: authentication failed");
   return messageKey;
 }
 
@@ -197,20 +193,21 @@ function decryptMessageKey(encryptedKey, recipientEd25519SecretKey) {
 function hybridEncrypt(message, recipientPublicKeys) {
   // Generate a random message key for symmetric encryption
   const messageKey = generateMessageKey();
-  
+
   // Encrypt the payload with the message key
   const encryptedPayload = encryptWithMessageKey(message, messageKey);
-  
+
   // Encrypt the message key for each recipient
   const encryptedKeys = {};
   for (const publicKey of recipientPublicKeys) {
-    const recipientId = typeof publicKey === 'string' ? publicKey : naclUtil.encodeBase64(publicKey);
+    const recipientId =
+      typeof publicKey === "string" ? publicKey : naclUtil.encodeBase64(publicKey);
     encryptedKeys[recipientId] = encryptMessageKey(messageKey, publicKey);
   }
-  
+
   return {
     encryptedPayload,
-    encryptedKeys
+    encryptedKeys,
   };
 }
 
@@ -223,20 +220,21 @@ function hybridEncrypt(message, recipientPublicKeys) {
  */
 function hybridDecrypt(hybridEncrypted, recipientPublicKey, recipientPrivateKey) {
   const { encryptedPayload, encryptedKeys } = hybridEncrypted;
-  
+
   // Find the recipient's encrypted key
-  const recipientId = typeof recipientPublicKey === 'string' 
-    ? recipientPublicKey 
-    : naclUtil.encodeBase64(recipientPublicKey);
-  
+  const recipientId =
+    typeof recipientPublicKey === "string"
+      ? recipientPublicKey
+      : naclUtil.encodeBase64(recipientPublicKey);
+
   const encryptedKey = encryptedKeys[recipientId];
   if (!encryptedKey) {
-    throw new Error('No encrypted key found for this recipient');
+    throw new Error("No encrypted key found for this recipient");
   }
-  
+
   // Decrypt the message key
   const messageKey = decryptMessageKey(encryptedKey, recipientPrivateKey);
-  
+
   // Decrypt the payload with the message key
   return decryptWithMessageKey(encryptedPayload, messageKey);
 }
@@ -250,5 +248,5 @@ module.exports = {
   encryptMessageKey,
   decryptMessageKey,
   hybridEncrypt,
-  hybridDecrypt
+  hybridDecrypt,
 };

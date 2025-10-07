@@ -86,9 +86,9 @@ Returns a new EnSyncClient instance
 
 ```javascript
 await client.publish(
-  "event/name",           // Event name
-  ["recipient-id"],       // Recipients
-  { data: "payload" }     // Event payload
+  "event/name", // Event name
+  ["recipient-id"], // Recipients
+  { data: "payload" } // Event payload
 );
 ```
 
@@ -152,7 +152,7 @@ Returns a subscription object with the following methods:
 ### Closing Connections
 
 ```javascript
-await client.destroy(stopEngine)
+await client.destroy(stopEngine);
 ```
 
 #### Destroy Parameters
@@ -205,26 +205,24 @@ const response = async () => {
   try {
     const eventName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL";
     const engine = new EnSyncEngine("https://localhost:8443", {
-      disableTls: true
+      disableTls: true,
     });
-    
+
     const client = await engine.createClient("your-access-key");
-    
+
     // Payload is user-defined
-    await client.publish(eventName, [
-      "recipient-id"
-    ], {
+    await client.publish(eventName, ["recipient-id"], {
       transactionId: "123",
       amount: 100,
       terminal: "pos-1",
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
-    
+
     await client.destroy();
-  } catch(e) {
+  } catch (e) {
     console.error("Error:", e?.message);
   }
-}
+};
 ```
 
 ---
@@ -238,30 +236,30 @@ const response = async () => {
   try {
     const eventName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL";
     const engine = new EnSyncEngine("https://localhost:8443", {
-      disableTls: true
+      disableTls: true,
     });
-    
+
     const client = await engine.createClient("your-access-key");
     const subscription = await client.subscribe(eventName);
-    
+
     subscription.on(async (event) => {
       try {
         // event is an EnSyncEventPayload
         console.log("Event ID:", event.id);
         console.log("Event Block:", event.block);
-        console.log("Event Data:", event.data);  // Contains the user-defined payload
+        console.log("Event Data:", event.data); // Contains the user-defined payload
         console.log("Event Timestamp:", event.timestamp);
-        
+
         await subscription.ack(event.id, event.block);
         await subscription.unsubscribe();
       } catch (e) {
         console.error("Processing error:", e);
       }
     });
-  } catch(e) {
+  } catch (e) {
     console.error("Error:", e?.message);
   }
-}
+};
 ```
 
 ---
@@ -276,18 +274,18 @@ const response = async () => {
 
 ```javascript
 // Using environment variables for sensitive keys
-require('dotenv').config();
+require("dotenv").config();
 
 const engine = new EnSyncEngine(process.env.ENSYNC_URL);
 const client = await engine.createClient(process.env.ENSYNC_ACCESS_KEY);
 
 // Implement proper error handling and reconnection
-engine.on('disconnect', () => {
-  console.log('Connection lost, will reconnect automatically');
+engine.on("disconnect", () => {
+  console.log("Connection lost, will reconnect automatically");
 });
 
 // Close connections when done
-process.on('SIGINT', async () => {
+process.on("SIGINT", async () => {
   await client.destroy(true);
   process.exit(0);
 });
@@ -301,17 +299,13 @@ process.on('SIGINT', async () => {
 
 ```javascript
 // Good event naming pattern
-await client.publish(
-  "inventory/product/created",
-  ["warehouse-service"],
-  {
-    productId: "prod-123",
-    name: "Ergonomic Chair",
-    sku: "ERG-CH-BLK",
-    price: 299.99,
-    createdAt: Date.now()
-  }
-);
+await client.publish("inventory/product/created", ["warehouse-service"], {
+  productId: "prod-123",
+  name: "Ergonomic Chair",
+  sku: "ERG-CH-BLK",
+  price: 299.99,
+  createdAt: Date.now(),
+});
 ```
 
 ### Security Best Practices

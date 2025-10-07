@@ -1,9 +1,9 @@
-require('dotenv').config();
+require("dotenv").config();
 const { EnSyncEngine } = require("../index");
 
 const response = async () => {
-const ensyncClient = new EnSyncEngine("https://localhost:8443", { disableTls: true });
-const client = await ensyncClient.createClient(process.env.ENSYNC_ACCESS_KEY); // accessKey
+  const ensyncClient = new EnSyncEngine("https://localhost:8443", { disableTls: true });
+  const client = await ensyncClient.createClient(process.env.ENSYNC_ACCESS_KEY); // accessKey
   try {
     // const eventName = "adyen/payment/POS/PAYMENT_SUCCESSFUL" // Event Created using the ensync-cli see ()
     const eventName = process.env.EVENT_TO_PUBLISH; // Event Created using the ensync-cli see ()
@@ -12,22 +12,23 @@ const client = await ensyncClient.createClient(process.env.ENSYNC_ACCESS_KEY); /
 
     // Track total execution time
     const totalStartTime = Date.now();
-    
+
     // Wait for server to initialize
-    console.log('Waiting for server initialization...');
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
+    console.log("Waiting for server initialization...");
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
     // Array to store all durations
     const durations = [];
 
     // // Imitates microservice sending multiple events
     for (let index = 0; index < 2000; index++) {
       const start = Date.now();
-      const c2 = await client.publish(eventName, [process.env.RECEIVER_IDENTIFICATION_NUMBER], { // receiverIdentificationNumber
+      const c2 = await client.publish(eventName, [process.env.RECEIVER_IDENTIFICATION_NUMBER], {
+        // receiverIdentificationNumber
         name: "hey",
         responseType: 12,
         data: {
-          props: "1"
+          props: "1",
         },
       });
       // const c2 = await client.publish(eventName, {key: "hi", me: {}})
@@ -54,22 +55,23 @@ const client = await ensyncClient.createClient(process.env.ENSYNC_ACCESS_KEY); /
     const avg = durations.reduce((a, b) => a + b, 0) / durations.length;
     const min = Math.min(...durations);
     const max = Math.max(...durations);
-    console.log('\n=== Final Statistics ===');
+    console.log("\n=== Final Statistics ===");
     console.log(`Total requests: ${durations.length}`);
     console.log(`Average duration: ${avg.toFixed(2)} ms`);
     console.log(`Minimum duration: ${min} ms`);
     console.log(`Maximum duration: ${max} ms`);
     console.log("Date of Execution", new Date().toLocaleString());
-    console.log('=====================');
-    
+    console.log("=====================");
+
     // Calculate total execution time
     const totalTime = Date.now() - totalStartTime;
     console.log(`\nTotal execution time: ${(totalTime / 1000).toFixed(2)} seconds\n`);
-    const event = await client.publish(eventName, [process.env.RECEIVER_IDENTIFICATION_NUMBER], { // receiverIdentificationNumber
+    const event = await client.publish(eventName, [process.env.RECEIVER_IDENTIFICATION_NUMBER], {
+      // receiverIdentificationNumber
       name: "hey",
       responseType: 12,
       data: {
-        props: "1"
+        props: "1",
       },
     });
 

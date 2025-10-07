@@ -28,9 +28,9 @@ The EnSync SDK supports two transport protocols:
 ### Using gRPC (Default)
 
 ```javascript
-const { EnSyncEngine } = require('ensync-client-sdk');
+const { EnSyncEngine } = require("ensync-client-sdk");
 // or explicitly
-const { EnSyncEngine } = require('ensync-client-sdk/grpc');
+const { EnSyncEngine } = require("ensync-client-sdk/grpc");
 
 // Non-authenticated connection
 const client = new EnSyncEngine("grpc://localhost:50051");
@@ -44,7 +44,7 @@ await secureClient.createClient(accessKey);
 ### Using WebSocket
 
 ```javascript
-const { EnSyncEngine } = require('ensync-client-sdk/websocket');
+const { EnSyncEngine } = require("ensync-client-sdk/websocket");
 
 const client = new EnSyncEngine("ws://localhost:8082");
 await client.createClient(accessKey);

@@ -21,6 +21,7 @@ npm install
 ```
 
 The gRPC dependencies are:
+
 - `@grpc/grpc-js`: gRPC implementation for Node.js
 - `@grpc/proto-loader`: Dynamic proto file loading
 
@@ -29,7 +30,7 @@ The gRPC dependencies are:
 ### Importing the Client
 
 ```javascript
-const { EnSyncEngine } = require('ensync-client-sdk/grpc');
+const { EnSyncEngine } = require("ensync-client-sdk/grpc");
 ```
 
 ### Creating a Client
@@ -38,18 +39,18 @@ const { EnSyncEngine } = require('ensync-client-sdk/grpc');
 // Create gRPC client with insecure connection
 const grpcEngine = new EnSyncEngine("grpc://localhost:50051", {
   heartbeatInterval: 15000, // 15 seconds
-  maxReconnectAttempts: 3
+  maxReconnectAttempts: 3,
 });
 
 // Create gRPC client with secure TLS connection
 const secureEngine = new EnSyncEngine("grpcs://node.ensync.cloud:50051", {
   heartbeatInterval: 15000,
-  maxReconnectAttempts: 3
+  maxReconnectAttempts: 3,
 });
 
 // Authenticate
 const client = await grpcEngine.createClient(accessKey, {
-  appSecretKey: secretKey // Optional: for decryption
+  appSecretKey: secretKey, // Optional: for decryption
 });
 ```
 
@@ -61,9 +62,9 @@ await client.publish(
   [recipientPublicKey],
   {
     meter_per_seconds: 25,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   },
-  { persist: true, headers: { source: 'my-app' } }
+  { persist: true, headers: { source: "my-app" } }
 );
 ```
 
@@ -72,15 +73,15 @@ await client.publish(
 ```javascript
 const subscription = await client.subscribe(eventName, {
   autoAck: false,
-  appSecretKey: secretKey
+  appSecretKey: secretKey,
 });
 
 subscription.on(async (event) => {
-  console.log('Received event:', event);
-  
+  console.log("Received event:", event);
+
   // Process the event
   // ...
-  
+
   // Acknowledge the event
   await subscription.ack(event.idem, event.block);
 });
@@ -117,10 +118,11 @@ await client.close();
 ### EnSyncEngine Constructor
 
 ```javascript
-new EnSyncEngine(url, options)
+new EnSyncEngine(url, options);
 ```
 
 **Parameters:**
+
 - `url` (string): gRPC server URL
   - Use `grpc://` for insecure connections (e.g., `grpc://localhost:50051`)
   - Use `grpcs://` for secure TLS connections (e.g., `grpcs://node.ensync.cloud:50051`)
@@ -134,6 +136,7 @@ new EnSyncEngine(url, options)
 Authenticates with the EnSync server.
 
 **Parameters:**
+
 - `accessKey` (string): Access key for authentication
 - `options` (object):
   - `appSecretKey` (string): Optional secret key for decryption
@@ -145,6 +148,7 @@ Authenticates with the EnSync server.
 Publishes an event to the EnSync system.
 
 **Parameters:**
+
 - `eventName` (string): Name of the event
 - `recipients` (string[]): Array of recipient public keys (base64 encoded)
 - `payload` (object): Event payload
@@ -161,6 +165,7 @@ Publishes an event to the EnSync system.
 Subscribes to an event stream.
 
 **Parameters:**
+
 - `eventName` (string): Name of the event to subscribe to
 - `options` (object):
   - `autoAck` (boolean): Automatically acknowledge events (default: true)
@@ -216,15 +221,15 @@ The gRPC service is defined in `ensync.proto`. Key services include:
 
 ## Comparison with WebSocket Client
 
-| Feature | WebSocket | gRPC |
-|---------|-----------|------|
-| Connection Type | WebSocket | HTTP/2 |
-| Protocol | Text-based | Binary (Protocol Buffers) |
-| Streaming | Bidirectional | Server streaming |
-| Performance | Good | Better for high throughput |
-| Load Balancing | Manual | Built-in |
-| Type Safety | Runtime | Compile-time (with proto) |
-| Browser Support | Yes | Limited (gRPC-Web required) |
+| Feature         | WebSocket     | gRPC                        |
+| --------------- | ------------- | --------------------------- |
+| Connection Type | WebSocket     | HTTP/2                      |
+| Protocol        | Text-based    | Binary (Protocol Buffers)   |
+| Streaming       | Bidirectional | Server streaming            |
+| Performance     | Good          | Better for high throughput  |
+| Load Balancing  | Manual        | Built-in                    |
+| Type Safety     | Runtime       | Compile-time (with proto)   |
+| Browser Support | Yes           | Limited (gRPC-Web required) |
 
 ## Performance Considerations
 
@@ -241,6 +246,7 @@ The gRPC service is defined in `ensync.proto`. Key services include:
 ### Connection Errors
 
 If you encounter connection errors:
+
 - Verify the gRPC server is running on the specified port
 - Check firewall settings
 - Ensure the server supports the gRPC protocol
@@ -262,21 +268,23 @@ If you encounter connection errors:
 To migrate from the WebSocket client to gRPC:
 
 1. Change the import:
+
    ```javascript
    // Before
-   const { EnSyncEngine } = require('ensync-client-sdk');
-   
+   const { EnSyncEngine } = require("ensync-client-sdk");
+
    // After
-   const { EnSyncEngine } = require('ensync-client-sdk/grpc');
+   const { EnSyncEngine } = require("ensync-client-sdk/grpc");
    ```
 
 2. Update the URL format:
+
    ```javascript
    // Before
-   new EnSyncEngine("ws://localhost:8082")
-   
+   new EnSyncEngine("ws://localhost:8082");
+
    // After
-   new EnSyncEngine("localhost:50051")
+   new EnSyncEngine("localhost:50051");
    ```
 
 3. The API remains the same, so no other code changes are required!

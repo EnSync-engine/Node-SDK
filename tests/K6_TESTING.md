@@ -5,6 +5,7 @@ This document describes how to use K6 to perform load testing on the EnSync SDK 
 ## Prerequisites
 
 1. Install K6:
+
    - macOS: `brew install k6`
    - Linux: Follow instructions at [https://k6.io/docs/getting-started/installation/](https://k6.io/docs/getting-started/installation/)
    - Windows: Follow instructions at [https://k6.io/docs/getting-started/installation/](https://k6.io/docs/getting-started/installation/)
@@ -106,12 +107,14 @@ This test measures how many concurrent WebSocket connections the EnSync server c
 4. Ramps down to 0 connections over 30 seconds
 
 Each connection:
+
 - Establishes a WebSocket connection to the EnSync server
 - Authenticates using the provided access key
 - Maintains the connection for a short period
 - Properly handles ping/pong messages for keepalive
 
 Metrics collected:
+
 - `connection_failures`: Count of failed connection attempts
 - `connection_successes`: Count of successful connections
 - `connection_time`: Time taken to establish a connection
@@ -130,6 +133,7 @@ This test measures how many events can be published concurrently and the perform
 The test can use either standard or hybrid encryption based on the `USE_HYBRID` setting.
 
 Metrics collected:
+
 - `publish_successes`: Count of successful publishes
 - `publish_failures`: Count of failed publishes
 - `publish_time`: Time taken to complete a publish operation
@@ -174,15 +178,18 @@ Based on previous performance testing:
 ## Troubleshooting
 
 1. **Connection Errors**: If you see many connection failures, check:
+
    - EnSync server is running and accessible
    - WebSocket endpoint is correct
    - Server has sufficient resources
 
 2. **Authentication Failures**: Check:
+
    - ACCESS_KEY is valid
    - EnSync server authentication service is working
 
 3. **Publish Failures**: Check:
+
    - RECIPIENT_ID is valid
    - Payload size is reasonable
    - Server has sufficient resources

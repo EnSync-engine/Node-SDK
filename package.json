@@ -1,7 +1,7 @@
 {
   "name": "ensync-client-sdk",
-  "version": "0.0.27",
-  "description": "Client SDK for EnSync Engine",
+  "version": "0.1.0",
+  "description": "Client SDK for EnSync Engine - gRPC and WebSocket support",
   "main": "grpc.js",
   "exports": {
     ".": "./grpc.js",
@@ -10,15 +10,38 @@
   },
   "scripts": {
     "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
-    "format:check": "prettier --check \"**/*.{js,jsx,ts,tsx,json,md}\""
+    "format:check": "prettier --check \"**/*.{js,jsx,ts,tsx,json,md}\"",
+    "prepublishOnly": "npm run format:check"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/EnSync-engine/Node-SDK.git"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "ensync",
+    "grpc",
+    "websocket",
+    "event-driven",
+    "messaging",
+    "real-time",
+    "pub-sub"
+  ],
+  "author": "EnSync Team",
   "license": "ISC",
+  "files": [
+    "grpc.js",
+    "websocket.js",
+    "http.js",
+    "http1.js",
+    "index.js",
+    "error.js",
+    "ecc-crypto.js",
+    "ensync.proto",
+    "README.md",
+    "GRPC_README.md",
+    "Sample.md",
+    "Doc.md"
+  ],
   "dependencies": {
     "@grpc/grpc-js": "^1.14.0",
     "@grpc/proto-loader": "^0.7.15",

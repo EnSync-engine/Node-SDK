@@ -1,16 +1,16 @@
-require('dotenv').config();
-const { EnSyncEngine } = require('../websocket');
+require("dotenv").config();
+const { EnSyncEngine } = require("../websocket");
 
-console.log('Starting WebSocket producer test...');
+console.log("Starting WebSocket producer test...");
 
 const response = async () => {
   if (!process.env.ENSYNC_ACCESS_KEY) {
-    console.error('ERROR: ENSYNC_ACCESS_KEY environment variable is not set');
+    console.error("ERROR: ENSYNC_ACCESS_KEY environment variable is not set");
     process.exit(1);
   }
 
   if (!process.env.EVENT_TO_PUBLISH) {
-    console.error('ERROR: EVENT_TO_PUBLISH environment variable is not set');
+    console.error("ERROR: EVENT_TO_PUBLISH environment variable is not set");
     process.exit(1);
   }
 
@@ -22,13 +22,12 @@ const response = async () => {
     const wsEngine = new EnSyncEngine("ws://localhost:8082", {
       pingInterval: 15000, // 15 seconds
       reconnectInterval: 3000, // 3 seconds
-      maxReconnectAttempts: 3
+      maxReconnectAttempts: 3,
     });
 
-    console.log('Creating WebSocket client...');
+    console.log("Creating WebSocket client...");
     const client = await wsEngine.createClient(process.env.ENSYNC_ACCESS_KEY);
-    console.log('Successfully created and authenticated WebSocket client');
-
+    console.log("Successfully created and authenticated WebSocket client");
 
     // Track statistics
     const durations = [];
@@ -40,14 +39,14 @@ const response = async () => {
       const start = Date.now();
       try {
         const result = await client.publish(
-          eventName, 
-          [process.env.RECEIVER_IDENTIFICATION_NUMBER], 
+          eventName,
+          [process.env.RECEIVER_IDENTIFICATION_NUMBER],
           {
-            "meter_per_seconds": Math.floor(Math.random() * 30),
+            meter_per_seconds: Math.floor(Math.random() * 30),
           },
           { persist: true, headers: {} }
         );
-        
+
         const end = Date.now();
         const duration = end - start;
         durations.push(duration);
@@ -62,19 +61,18 @@ const response = async () => {
     const min = Math.min(...durations);
     const max = Math.max(...durations);
     const totalTime = Date.now() - totalStartTime;
-    console.log('\n=== Final Statistics ===');
+    console.log("\n=== Final Statistics ===");
     console.log(`Total requests: ${durations.length}`);
     console.log(`Average duration: ${avg.toFixed(2)} ms`);
     console.log(`Minimum duration: ${min} ms`);
     console.log(`Maximum duration: ${max} ms`);
     console.log("Date of Execution", new Date().toLocaleString());
     console.log(`\nTotal execution time: ${(totalTime / 1000).toFixed(2)} seconds\n`);
-    console.log('=====================');
-
+    console.log("=====================");
   } catch (error) {
-    console.error('Fatal error occurred:', error);
+    console.error("Fatal error occurred:", error);
     if (error.cause) {
-      console.error('Caused by:', error.cause);
+      console.error("Caused by:", error.cause);
     }
     process.exit(1);
   }

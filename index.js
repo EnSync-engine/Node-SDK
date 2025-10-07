@@ -1,9 +1,9 @@
 const http2 = require("node:http2");
 const { EnSyncError, GENERIC_MESSAGE } = require("./error");
-const naclUtil = require('tweetnacl-util');
-const { encryptEd25519, decryptEd25519 } = require('./ecc-crypto');
+const naclUtil = require("tweetnacl-util");
+const { encryptEd25519, decryptEd25519 } = require("./ecc-crypto");
 
-const SERVICE_NAME = 'EnSync';
+const SERVICE_NAME = "EnSync";
 let RENEW_AT;
 
 const wait = (ms) => {
@@ -103,7 +103,16 @@ class EnSyncEngine {
    * @fires EnSyncEngine#connect - When connection is established
    * @fires EnSyncEngine#disconnect - When connection is closed
    */
-  constructor(ensyncURL, { version = "v1", useHttp1 = false, disableTls = false, ignoreException = false, renewAt = 320000 }) {
+  constructor(
+    ensyncURL,
+    {
+      version = "v1",
+      useHttp1 = false,
+      disableTls = false,
+      ignoreException = false,
+      renewAt = 320000,
+    }
+  ) {
     RENEW_AT = renewAt;
     this.#config = {
       version: version,
@@ -206,7 +215,7 @@ class EnSyncEngine {
             req.write(command);
 
             req.on("error", (err) => {
-              if (err.code === 'ERR_HTTP2_STREAM_CANCEL') {
+              if (err.code === "ERR_HTTP2_STREAM_CANCEL") {
                 // Retry the request after a short delay
                 setTimeout(() => makeRequest(), 100);
               } else {
@@ -227,7 +236,7 @@ class EnSyncEngine {
               });
             req.end();
           } catch (err) {
-            if (err.code === 'ERR_HTTP2_STREAM_CANCEL') {
+            if (err.code === "ERR_HTTP2_STREAM_CANCEL") {
               // Retry the request after a short delay
               setTimeout(() => makeRequest(), 100);
             } else {
@@ -361,9 +370,7 @@ class EnSyncEngine {
      * @returns {string} The converted string ready for JSON parsing
      */
     #convertKeyValueToObj(data) {
-      return data
-        .replace(/=(\w+)/g, ': $1')
-        .replace(/(\w+=*)/g, '"$1"')
+      return data.replace(/=(\w+)/g, ": $1").replace(/(\w+=*)/g, '"$1"');
     }
 
     /**
@@ -381,11 +388,13 @@ class EnSyncEngine {
         const record = JSON.parse(this.#convertKeyValueToObj(content));
         if (record && record.constructor.name == "Object") {
           if (record) {
-            const decodedPayloadJson = Buffer.from(record.payload, 'base64').toString('utf8');
+            const decodedPayloadJson = Buffer.from(record.payload, "base64").toString("utf8");
             const encryptedPayload = JSON.parse(decodedPayloadJson);
             await callback({
               ...record,
-              payload: JSON.parse(decryptEd25519(encryptedPayload, naclUtil.decodeBase64(decryptionKey)))
+              payload: JSON.parse(
+                decryptEd25519(encryptedPayload, naclUtil.decodeBase64(decryptionKey))
+              ),
             });
             if (autoAck) {
               await this.#ack(record.id, record.block);
@@ -474,7 +483,10 @@ class EnSyncEngine {
           `ROLLBACK;CLIENT_ID=:${this.#engine.#config.clientId};EVENT_IDEM=:${eventIdem};BLOCK=:${block}`
         );
       } catch (e) {
-        throw new EnSyncError("Failed to trigger rollBack. " + GENERIC_MESSAGE, "EnSyncGenericError");
+        throw new EnSyncError(
+          "Failed to trigger rollBack. " + GENERIC_MESSAGE,
+          "EnSyncGenericError"
+        );
       }
     }
 
@@ -514,7 +526,7 @@ class EnSyncEngine {
      * ```
      */
 
-    async publish(eventName, recipients, payload = {}, metadata = {persist: true, headers: {}}) {
+    async publish(eventName, recipients, payload = {}, metadata = { persist: true, headers: {} }) {
       if (!this.#engine.#config.clientId)
         throw new EnSyncError("Cannot publish an event when you haven't created a client");
 
@@ -530,17 +542,20 @@ class EnSyncEngine {
         const responses = [];
         // Encrypt and send for each recipient individually
         for (const recipient of recipients) {
-          const encrypted = encryptEd25519(JSON.stringify(payload), naclUtil.decodeBase64(recipient));
+          const encrypted = encryptEd25519(
+            JSON.stringify(payload),
+            naclUtil.decodeBase64(recipient)
+          );
           const encryptedBase64 = naclUtil.encodeBase64(Buffer.from(JSON.stringify(encrypted)));
           const response = await this.#engine.#createRequest(
             `PUB;CLIENT_ID=:${this.#engine.#config.clientId};EVENT_NAME=:${eventName};PAYLOAD=:${encryptedBase64};DELIVERY_TO=:${recipient};METADATA=:${JSON.stringify(metadata)}`
           );
           responses.push(response);
         }
-        return responses.join(',');
+        return responses.join(",");
       } catch (e) {
         throw new EnSyncError(e, "EnSyncGenericError");
-      } 
+      }
     }
 
     /**
@@ -574,10 +589,12 @@ class EnSyncEngine {
         );
 
         return {
-          pull: (options, callback) => this.#pullRecords(eventName, options, appSecretKey, callback),
+          pull: (options, callback) =>
+            this.#pullRecords(eventName, options, appSecretKey, callback),
           ack: (eventIdem, block) => this.#ack(eventIdem, block),
           rollback: (eventIdem, block) => this.#rollBack(eventIdem, block),
-          stream: (options, callback) => this.#streamRecords(eventName, options, appSecretKey, callback),
+          stream: (options, callback) =>
+            this.#streamRecords(eventName, options, appSecretKey, callback),
           unsubscribe: async () => {
             return await this.#unsubscribe(eventName);
           },
