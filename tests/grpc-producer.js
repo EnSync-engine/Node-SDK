@@ -1,7 +1,7 @@
 require('dotenv').config();
-const { EnSyncEngine } = require('../websocket');
+const { EnSyncEngine } = require('../grpc');
 
-console.log('Starting WebSocket producer test...');
+console.log('Starting gRPC producer test...');
 
 const response = async () => {
   if (!process.env.ENSYNC_ACCESS_KEY) {
@@ -14,21 +14,17 @@ const response = async () => {
     process.exit(1);
   }
 
-  // console.log('Initializing WebSocket client...');
-  // console.log('Access Key:', process.env.ENSYNC_ACCESS_KEY.substring(0, 10) + '...');
-  // console.log('Event to publish:', process.env.EVENT_TO_PUBLISH);
-
   try {
-    const wsEngine = new EnSyncEngine("ws://localhost:8082", {
-      pingInterval: 15000, // 15 seconds
-      reconnectInterval: 3000, // 3 seconds
+    // Create gRPC client with insecure connection
+    const grpcEngine = new EnSyncEngine("grpc://localhost:50051", {
+      heartbeatInterval: 15000, // 15 seconds
       maxReconnectAttempts: 3
     });
 
-    console.log('Creating WebSocket client...');
-    const client = await wsEngine.createClient(process.env.ENSYNC_ACCESS_KEY);
-    console.log('Successfully created and authenticated WebSocket client');
-
+    console.log('Creating gRPC client...');
+    const client = await grpcEngine.createClient(process.env.ENSYNC_ACCESS_KEY);
+    console.log('Successfully created and authenticated gRPC client');
+    console.log('Client ID:', client.getClientPublicKey());
 
     // Track statistics
     const durations = [];
@@ -36,7 +32,9 @@ const response = async () => {
 
     // Publish test events
     const eventName = process.env.EVENT_TO_PUBLISH;
-    for (let index = 0; index < 2; index++) {
+    const numEvents = 10;
+    
+    for (let index = 0; index < numEvents; index++) {
       const start = Date.now();
       try {
         const result = await client.publish(
@@ -44,17 +42,22 @@ const response = async () => {
           [process.env.RECEIVER_IDENTIFICATION_NUMBER], 
           {
             "meter_per_seconds": Math.floor(Math.random() * 30),
+            "event_number": index,
+            "timestamp": new Date().toISOString()
           },
-          { persist: true, headers: {} }
+          { persist: true, headers: { source: 'grpc-producer' } }
         );
         
         const end = Date.now();
         const duration = end - start;
         durations.push(duration);
+        
+        console.log(`Event ${index + 1}/${numEvents} published successfully (${duration}ms)`);
       } catch (error) {
         console.error(`Error publishing event ${index}:`, error);
       }
     }
+    
     await client.close();
 
     // Calculate and display final statistics
@@ -62,6 +65,7 @@ const response = async () => {
     const min = Math.min(...durations);
     const max = Math.max(...durations);
     const totalTime = Date.now() - totalStartTime;
+    
     console.log('\n=== Final Statistics ===');
     console.log(`Total requests: ${durations.length}`);
     console.log(`Average duration: ${avg.toFixed(2)} ms`);

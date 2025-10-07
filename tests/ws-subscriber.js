@@ -17,8 +17,8 @@ const response = async () => {
 
     let eventCount = -1;
 
-    // const replayResult = await subscription2.replay("eXNETssA19Nn");
-    // console.log("Replay Result:", replayResult);
+    const replayResult = await subscription2.replay("1uTWWUuTNHB7");
+    console.log("Replay Result:", replayResult);
 
     subscription2.on(async (event) => {
       try {
@@ -30,7 +30,7 @@ const response = async () => {
         if (eventCount === 1) {
           // const pauseResult = await subscription2.pause("Pausing event");
           // console.log("Pause Result:", pauseResult);
-          const deferredResult = await subscription2.defer(event.idem, 1000, "Deferring second event");
+          const deferredResult = await subscription2.defer(event.idem, 10000, "Deferring second event");
           console.log("Deferred Result:", deferredResult);
           return
         }

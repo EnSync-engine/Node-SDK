@@ -18,14 +18,27 @@ npm install ensync-client-sdk
 
 ## Usage
 
+### Transport Options
+
+The EnSync SDK supports two transport protocols:
+
+- **gRPC (Default)** - High-performance binary protocol with HTTP/2, ideal for server-to-server communication
+- **WebSocket** - Real-time bidirectional communication, great for browser and Node.js applications
+
 ### Importing
 
 ```javascript
-// CommonJS
+// CommonJS - gRPC (Default)
 const { EnSyncEngine } = require("ensync-client-sdk");
 
+// Explicitly use gRPC
+const { EnSyncEngine } = require("ensync-client-sdk/grpc");
+
+// Use WebSocket instead
+const { EnSyncEngine } = require("ensync-client-sdk/websocket");
+
 // ES Modules
-import { EnSyncEngine } from "ensync-client-sdk";
+import { EnSyncEngine } from "ensync-client-sdk"; // gRPC by default
 ```
 
 ---
@@ -42,11 +55,22 @@ const engine = new EnSyncEngine(url, options);
 
 #### Parameters
 
-- `url` (string): The URL of the EnSync server
+**For gRPC (Default):**
+
+- `url` (string): The gRPC server address
+  - Use `grpc://` for insecure connections (e.g., `grpc://localhost:50051`)
+  - Use `grpcs://` for secure TLS connections (e.g., `grpcs://node.ensync.cloud:50051`)
 - `options` (object, optional):
-  - `disableTls` (boolean): Set to true to disable TLS (default: false)
+  - `heartbeatInterval` (number): Heartbeat interval in ms (default: 30000)
+  - `maxReconnectAttempts` (number): Maximum reconnection attempts (default: 5)
+
+**For WebSocket:**
+
+- `url` (string): The WebSocket URL (e.g., `ws://localhost:8082` or `wss://node.ensync.cloud`)
+- `options` (object, optional):
+  - `pingInterval` (number): Ping interval in ms (default: 30000)
   - `reconnectInterval` (number): Reconnection interval in ms (default: 5000)
-  - `maxReconnectAttempts` (number): Maximum reconnection attempts (default: 10)
+  - `maxReconnectAttempts` (number): Maximum reconnection attempts (default: 5)
 
 #### Events
 
@@ -217,7 +241,7 @@ Common error types:
 
 ## Complete Examples
 
-### Quick Start
+### Quick Start (gRPC - Default)
 
 ```javascript
 require('dotenv').config();
@@ -225,7 +249,52 @@ const { EnSyncEngine } = require('ensync-client-sdk');
 
 async function quickStart() {
   try {
-    // 1. Initialize engine and create client
+    // 1. Initialize engine and create client (gRPC by default)
+    // Use grpc:// for insecure or grpcs:// for secure TLS connection
+    const engine = new EnSyncEngine("grpc://localhost:50051");
+    const client = await engine.createClient(process.env.ENSYNC_APP_KEY, {
+      appSecretKey: process.env.ENSYNC_SECRET_KEY
+    });
+
+    // 2. Publish an event
+    await client.publish(
+      "orders/status/updated",
+      ["appId"],  // The appId of the receiving party
+      { orderId: "order-123", status: "completed" }
+    );
+
+    // 3. Subscribe to events
+    const subscription = await client.subscribe("orders/status/updated");
+    
+    // 4. Handle incoming events
+    subscription.on(event => {
+      console.log(`Received order update: ${event.payload.orderId} is ${event.payload.status}`);
+      // Process event...
+    });
+
+    // 5. Clean up when done
+    process.on('SIGINT', async () => {
+      await subscription.unsubscribe();
+      await client.close();
+      process.exit(0);
+    });
+  } catch (error) {
+    console.error('Error:', error.message);
+  }
+}
+
+quickStart();
+```
+
+### Quick Start (WebSocket)
+
+```javascript
+require('dotenv').config();
+const { EnSyncEngine } = require('ensync-client-sdk/websocket');
+
+async function quickStart() {
+  try {
+    // 1. Initialize engine and create client (WebSocket)
     const engine = new EnSyncEngine("wss://node.ensync.cloud");
     const client = await engine.createClient(process.env.ENSYNC_APP_KEY, {
       appSecretKey: process.env.ENSYNC_SECRET_KEY
