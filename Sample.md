@@ -228,7 +228,7 @@ When you receive an event through a subscription handler, it contains:
   metadata: {                    // Optional metadata
     headers: { /* custom headers */ }
   },
-  recipient: "appId"            // The appId of the receiving party
+  sender: "base64-encoded-public-key"  // Sender's public key (or null)
 }
 ```
 

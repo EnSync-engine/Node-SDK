@@ -31,9 +31,6 @@
   "files": [
     "grpc.js",
     "websocket.js",
-    "http.js",
-    "http1.js",
-    "index.js",
     "error.js",
     "ecc-crypto.js",
     "ensync.proto",

@@ -189,6 +189,13 @@ class EnSyncEngine {
 
     const useHybridEncryption = options.useHybridEncryption !== false; // Default to true
 
+    // Calculate payload metadata
+    const payloadMetadata = this.analyzePayload(payload);
+    const payloadMetadataString = JSON.stringify({
+      byte_size: payloadMetadata.byteSize,
+      skeleton: payloadMetadata.skeleton
+    });
+
     try {
       const responses = [];
       let encryptedPayloads = [];
@@ -232,7 +239,7 @@ class EnSyncEngine {
 
       // Send messages to all recipients
       for (const { recipient, encryptedBase64 } of encryptedPayloads) {
-        const message = `PUB;CLIENT_ID=:${this.#config.clientId};EVENT_NAME=:${eventName};PAYLOAD=:${encryptedBase64};DELIVERY_TO=:${recipient};METADATA=:${JSON.stringify(metadata)}`;
+        const message = `PUB;CLIENT_ID=:${this.#config.clientId};EVENT_NAME=:${eventName};PAYLOAD=:${encryptedBase64};DELIVERY_TO=:${recipient};METADATA=:${JSON.stringify(metadata)};PAYLOAD_METADATA=:${payloadMetadataString}`;
         const response = await this.#sendMessage(message);
         responses.push(response);
       }
@@ -594,6 +601,7 @@ class EnSyncEngine {
           payload: record.payload,
           encryptedPayload: record.encryptedPayload,
           metadata: record.metadata || {},
+          sender: record.sender || null,
         };
       }
       return null;
@@ -626,6 +634,65 @@ class EnSyncEngine {
    */
   getClientPublicKey() {
     return this.#config.clientHash;
+  }
+
+  /**
+   * Gets the total byte size of a payload
+   * @param {Object} payload - The payload object to measure
+   * @returns {number} The byte size of the payload
+   */
+  getPayloadByteSize(payload) {
+    const payloadString = JSON.stringify(payload);
+    return Buffer.byteLength(payloadString, 'utf8');
+  }
+
+  /**
+   * Gets the top-level skeleton of a payload with property datatypes
+   * @param {Object} payload - The payload object to analyze
+   * @returns {Object} An object with the same keys but values replaced with their datatypes
+   */
+  getPayloadSkeleton(payload) {
+    const skeleton = {};
+    
+    for (const key in payload) {
+      if (payload.hasOwnProperty(key)) {
+        const value = payload[key];
+        
+        // Determine the type
+        if (value === null) {
+          skeleton[key] = 'null';
+        } else if (Array.isArray(value)) {
+          skeleton[key] = 'array';
+        } else {
+          skeleton[key] = typeof value;
+        }
+      }
+    }
+    
+    return skeleton;
+  }
+
+  /**
+   * Analyzes a payload and returns both byte size and skeleton
+   * @param {Object} payload - The payload object to analyze
+   * @returns {Object} An object containing byteSize and skeleton properties
+   */
+  analyzePayload(payload) {
+    const payloadString = JSON.stringify(payload);
+    const byteSize = Buffer.byteLength(payloadString, 'utf8');
+    
+    const skeleton = {};
+    for (const key in payload) {
+      if (payload.hasOwnProperty(key)) {
+        const value = payload[key];
+        skeleton[key] = value === null ? 'null' : (Array.isArray(value) ? 'array' : typeof value);
+      }
+    }
+    
+    return {
+      byteSize,
+      skeleton
+    };
   }
 
   // Private methods

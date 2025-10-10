@@ -142,6 +142,13 @@ class EnSyncEngine {
 
     const useHybridEncryption = options.useHybridEncryption !== false; // Default to true
 
+    // Calculate payload metadata
+    const payloadMetadata = this.analyzePayload(payload);
+    const payloadMetadataString = JSON.stringify({
+      byte_size: payloadMetadata.byteSize,
+      skeleton: payloadMetadata.skeleton
+    });
+
     try {
       const responses = [];
       let encryptedPayloads = [];
@@ -191,6 +198,7 @@ class EnSyncEngine {
           payload: encryptedBase64,
           delivery_to: recipient,
           metadata: JSON.stringify(metadata),
+          payload_metadata: payloadMetadataString,
         };
 
         const response = await this.#publishEvent(request);
@@ -318,6 +326,65 @@ class EnSyncEngine {
     return this.#config.clientHash;
   }
 
+  /**
+   * Gets the total byte size of a payload
+   * @param {Object} payload - The payload object to measure
+   * @returns {number} The byte size of the payload
+   */
+  getPayloadByteSize(payload) {
+    const payloadString = JSON.stringify(payload);
+    return Buffer.byteLength(payloadString, 'utf8');
+  }
+
+  /**
+   * Gets the top-level skeleton of a payload with property datatypes
+   * @param {Object} payload - The payload object to analyze
+   * @returns {Object} An object with the same keys but values replaced with their datatypes
+   */
+  getPayloadSkeleton(payload) {
+    const skeleton = {};
+    
+    for (const key in payload) {
+      if (payload.hasOwnProperty(key)) {
+        const value = payload[key];
+        
+        // Determine the type
+        if (value === null) {
+          skeleton[key] = 'null';
+        } else if (Array.isArray(value)) {
+          skeleton[key] = 'array';
+        } else {
+          skeleton[key] = typeof value;
+        }
+      }
+    }
+    
+    return skeleton;
+  }
+
+  /**
+   * Analyzes a payload and returns both byte size and skeleton
+   * @param {Object} payload - The payload object to analyze
+   * @returns {Object} An object containing byteSize and skeleton properties
+   */
+  analyzePayload(payload) {
+    const payloadString = JSON.stringify(payload);
+    const byteSize = Buffer.byteLength(payloadString, 'utf8');
+    
+    const skeleton = {};
+    for (const key in payload) {
+      if (payload.hasOwnProperty(key)) {
+        const value = payload[key];
+        skeleton[key] = value === null ? 'null' : (Array.isArray(value) ? 'array' : typeof value);
+      }
+    }
+    
+    return {
+      byteSize,
+      skeleton
+    };
+  }
+
   // Private methods
 
   /**
@@ -434,6 +501,7 @@ class EnSyncEngine {
         timestamp: Date.now(),
         payload: payload,
         metadata: eventData.metadata ? JSON.parse(eventData.metadata) : {},
+        sender: eventData.sender || null,
       };
     } catch (error) {
       console.error(`${SERVICE_NAME} Failed to process event:`, error);
