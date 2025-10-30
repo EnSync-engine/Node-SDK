@@ -149,7 +149,7 @@ class EnSyncEngine {
     const payloadMetadata = this.analyzePayload(payload);
     const payloadMetadataString = JSON.stringify({
       byte_size: payloadMetadata.byteSize,
-      skeleton: payloadMetadata.skeleton
+      skeleton: payloadMetadata.skeleton,
     });
 
     try {
@@ -336,7 +336,7 @@ class EnSyncEngine {
    */
   getPayloadByteSize(payload) {
     const payloadString = JSON.stringify(payload);
-    return Buffer.byteLength(payloadString, 'utf8');
+    return Buffer.byteLength(payloadString, "utf8");
   }
 
   /**
@@ -346,22 +346,22 @@ class EnSyncEngine {
    */
   getPayloadSkeleton(payload) {
     const skeleton = {};
-    
+
     for (const key in payload) {
       if (payload.hasOwnProperty(key)) {
         const value = payload[key];
-        
+
         // Determine the type
         if (value === null) {
-          skeleton[key] = 'null';
+          skeleton[key] = "null";
         } else if (Array.isArray(value)) {
-          skeleton[key] = 'array';
+          skeleton[key] = "array";
         } else {
           skeleton[key] = typeof value;
         }
       }
     }
-    
+
     return skeleton;
   }
 
@@ -372,19 +372,19 @@ class EnSyncEngine {
    */
   analyzePayload(payload) {
     const payloadString = JSON.stringify(payload);
-    const byteSize = Buffer.byteLength(payloadString, 'utf8');
-    
+    const byteSize = Buffer.byteLength(payloadString, "utf8");
+
     const skeleton = {};
     for (const key in payload) {
       if (payload.hasOwnProperty(key)) {
         const value = payload[key];
-        skeleton[key] = value === null ? 'null' : (Array.isArray(value) ? 'array' : typeof value);
+        skeleton[key] = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
       }
     }
-    
+
     return {
       byteSize,
-      skeleton
+      skeleton,
     };
   }
 
