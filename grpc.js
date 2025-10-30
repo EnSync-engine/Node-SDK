@@ -39,6 +39,7 @@ class EnSyncEngine {
     appSecretKey: null,
     heartbeatInterval: 30000, // 30 seconds
     maxReconnectAttempts: 5,
+    enableLogging: false, // Enable/disable console logs
   };
 
   /** @type {Object} */
@@ -67,6 +68,7 @@ class EnSyncEngine {
    * @param {Object} options - Configuration options
    * @param {number} [options.heartbeatInterval] - Heartbeat interval in ms (default: 30000)
    * @param {number} [options.maxReconnectAttempts] - Max reconnect attempts (default: 5)
+   * @param {boolean} [options.enableLogging=false] - Enable/disable console logs (default: false)
    */
   constructor(url, options = {}) {
     // Parse URL to determine if secure connection is needed
@@ -86,6 +88,7 @@ class EnSyncEngine {
     if (options.heartbeatInterval) this.#config.heartbeatInterval = options.heartbeatInterval;
     if (options.maxReconnectAttempts)
       this.#config.maxReconnectAttempts = options.maxReconnectAttempts;
+    if (options.enableLogging !== undefined) this.#config.enableLogging = options.enableLogging;
 
     // Create gRPC client with appropriate credentials
     const credentials = useSecure
@@ -263,24 +266,24 @@ class EnSyncEngine {
                 await this.#ack(processedEvent.idem, processedEvent.block, eventName);
               }
             } catch (error) {
-              console.error(`${SERVICE_NAME} Handler error:`, error);
+              this.#logError(`${SERVICE_NAME} Handler error:`, error);
             }
           }
         }
       } catch (error) {
-        console.error(`${SERVICE_NAME} Event processing error:`, error);
+        this.#logError(`${SERVICE_NAME} Event processing error:`, error);
       }
     });
 
     call.on("error", (error) => {
-      console.error(`${SERVICE_NAME} Subscription error:`, error);
+      this.#logError(`${SERVICE_NAME} Subscription error:`, error);
     });
 
     call.on("end", () => {
-      console.log(`${SERVICE_NAME} Subscription ended for ${eventName}`);
+      this.#log(`${SERVICE_NAME} Subscription ended for ${eventName}`);
     });
 
-    console.log(`${SERVICE_NAME} Successfully subscribed to ${eventName}`);
+    this.#log(`${SERVICE_NAME} Successfully subscribed to ${eventName}`);
 
     return {
       on: (handler) => this.#on(eventName, handler, options.appSecretKey, options.autoAck),
@@ -388,12 +391,42 @@ class EnSyncEngine {
   // Private methods
 
   /**
+   * Internal logging method that respects the enableLogging flag
+   * @private
+   */
+  #log(...args) {
+    if (this.#config.enableLogging) {
+      console.log(...args);
+    }
+  }
+
+  /**
+   * Internal error logging method that respects the enableLogging flag
+   * @private
+   */
+  #logError(...args) {
+    if (this.#config.enableLogging) {
+      console.error(...args);
+    }
+  }
+
+  /**
+   * Internal debug logging method that respects the enableLogging flag
+   * @private
+   */
+  #logDebug(...args) {
+    if (this.#config.enableLogging) {
+      console.debug(...args);
+    }
+  }
+
+  /**
    * Authenticates with the EnSync server
    * @private
    */
   async #authenticate() {
     return new Promise((resolve, reject) => {
-      console.log(`${SERVICE_NAME} Sending authentication request...`);
+      this.#log(`${SERVICE_NAME} Sending authentication request...`);
 
       const request = {
         access_key: this.#config.accessKey,
@@ -401,13 +434,13 @@ class EnSyncEngine {
 
       this.#client.Connect(request, (error, response) => {
         if (error) {
-          console.error(`${SERVICE_NAME} Authentication failed:`, error);
+          this.#logError(`${SERVICE_NAME} Authentication failed:`, error);
           reject(new EnSyncError("Authentication failed: " + error.message, "EnSyncAuthError"));
           return;
         }
 
         if (response.success) {
-          console.log(`${SERVICE_NAME} Authentication successful`);
+          this.#log(`${SERVICE_NAME} Authentication successful`);
           this.#config.clientId = response.client_id;
           this.#config.clientHash = response.client_hash;
           this.#state.isAuthenticated = true;
@@ -456,7 +489,7 @@ class EnSyncEngine {
       const decryptionKey = appSecretKey || this.#config.appSecretKey || this.#config.clientHash;
 
       if (!decryptionKey) {
-        console.error(`${SERVICE_NAME} No decryption key available`);
+        this.#logError(`${SERVICE_NAME} No decryption key available`);
         return null;
       }
 
@@ -481,12 +514,12 @@ class EnSyncEngine {
             decrypted = true;
             break;
           } catch (error) {
-            console.debug(`${SERVICE_NAME} Couldn't decrypt with recipient ID ${recipientId}`);
+            this.#logDebug(`${SERVICE_NAME} Couldn't decrypt with recipient ID ${recipientId}`);
           }
         }
 
         if (!decrypted) {
-          console.error(`${SERVICE_NAME} Failed to decrypt hybrid message`);
+          this.#logError(`${SERVICE_NAME} Failed to decrypt hybrid message`);
           return null;
         }
       } else {
@@ -504,7 +537,7 @@ class EnSyncEngine {
         sender: eventData.sender || null,
       };
     } catch (error) {
-      console.error(`${SERVICE_NAME} Failed to process event:`, error);
+      this.#logError(`${SERVICE_NAME} Failed to process event:`, error);
       return null;
     }
   }
@@ -550,7 +583,7 @@ class EnSyncEngine {
             subscription.call.cancel();
           }
           this.#subscriptions.delete(eventName);
-          console.log(`${SERVICE_NAME} Successfully unsubscribed from ${eventName}`);
+          this.#log(`${SERVICE_NAME} Successfully unsubscribed from ${eventName}`);
           resolve();
         } else {
           reject(new EnSyncError(response.message, "EnSyncSubscriptionError"));
@@ -776,9 +809,9 @@ class EnSyncEngine {
 
       this.#client.Heartbeat(request, (error, response) => {
         if (error) {
-          console.error(`${SERVICE_NAME} Heartbeat failed:`, error);
+          this.#logError(`${SERVICE_NAME} Heartbeat failed:`, error);
         } else if (response.success) {
-          console.log(`${SERVICE_NAME} Heartbeat successful`);
+          this.#log(`${SERVICE_NAME} Heartbeat successful`);
         }
       });
     }, this.#config.heartbeatInterval);

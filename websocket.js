@@ -29,6 +29,7 @@ class EnSyncEngine {
     pingInterval: 30000, // 30 seconds
     reconnectInterval: 5000, // 5 seconds
     maxReconnectAttempts: 5,
+    enableLogging: false, // Enable/disable console logs
   };
 
   /** @type {Object} */
@@ -60,6 +61,7 @@ class EnSyncEngine {
    * @param {number} [options.pingInterval] - Ping interval in ms (default: 30000)
    * @param {number} [options.reconnectInterval] - Reconnect interval in ms (default: 5000)
    * @param {number} [options.maxReconnectAttempts] - Max reconnect attempts (default: 5)
+   * @param {boolean} [options.enableLogging=false] - Enable/disable console logs (default: false)
    */
   constructor(url, options = {}) {
     this.#config.url = url.replace(/^http/, "ws") + "/message";
@@ -67,6 +69,7 @@ class EnSyncEngine {
     if (options.reconnectInterval) this.#config.reconnectInterval = options.reconnectInterval;
     if (options.maxReconnectAttempts)
       this.#config.maxReconnectAttempts = options.maxReconnectAttempts;
+    if (options.enableLogging !== undefined) this.#config.enableLogging = options.enableLogging;
   }
 
   /**
@@ -103,8 +106,48 @@ class EnSyncEngine {
     //   .replace(/(\w+)=/g, '"$1"=')
     //   .replace(/=(\w+)/g, '="$1"')
     //   .replaceAll("=", ": ");
-    console.log("data", data);
+    this.#log("data", data);
     return data;
+  }
+
+  /**
+   * Internal logging method that respects the enableLogging flag
+   * @private
+   */
+  #log(...args) {
+    if (this.#config.enableLogging) {
+      console.log(...args);
+    }
+  }
+
+  /**
+   * Internal error logging method that respects the enableLogging flag
+   * @private
+   */
+  #logError(...args) {
+    if (this.#config.enableLogging) {
+      console.error(...args);
+    }
+  }
+
+  /**
+   * Internal debug logging method that respects the enableLogging flag
+   * @private
+   */
+  #logDebug(...args) {
+    if (this.#config.enableLogging) {
+      console.debug(...args);
+    }
+  }
+
+  /**
+   * Internal warning logging method that respects the enableLogging flag
+   * @private
+   */
+  #logWarn(...args) {
+    if (this.#config.enableLogging) {
+      console.warn(...args);
+    }
   }
 
   /**
@@ -113,16 +156,16 @@ class EnSyncEngine {
    * @throws {EnSyncError} If connection or authentication fails
    */
   async connect() {
-    console.log(`${SERVICE_NAME} Connecting to ${this.#config.url}...`);
+    this.#log(`${SERVICE_NAME} Connecting to ${this.#config.url}...`);
     return new Promise((resolve, reject) => {
       try {
         this.#ws = new WebSocket(this.#config.url);
 
         this.#ws.on("open", () => {
-          console.log(`${SERVICE_NAME} WebSocket connection established`);
+          this.#log(`${SERVICE_NAME} WebSocket connection established`);
           this.#state.isConnected = true;
           this.#state.reconnectAttempts = 0;
-          console.log(`${SERVICE_NAME} Attempting authentication...`);
+          this.#log(`${SERVICE_NAME} Attempting authentication...`);
           this.#authenticate().then(resolve).catch(reject);
         });
 
@@ -131,19 +174,19 @@ class EnSyncEngine {
         });
 
         this.#ws.on("error", (error) => {
-          console.error(`${SERVICE_NAME} WebSocket error - ${error}`);
+          this.#logError(`${SERVICE_NAME} WebSocket error - ${error}`);
           this.#handleError(error);
         });
 
         this.#ws.on("close", (code, reason) => {
-          console.log(
+          this.#log(
             `${SERVICE_NAME} WebSocket closed with code ${code}${reason ? ": " + reason : ""}`
           );
           this.#handleClose(code, reason);
         });
 
         this.#ws.on("pong", () => {
-          console.log(`${SERVICE_NAME} Received pong from server - Connection alive`);
+          this.#log(`${SERVICE_NAME} Received pong from server - Connection alive`);
           this.#handlePong();
         });
 
@@ -151,7 +194,7 @@ class EnSyncEngine {
         this.#startPingInterval();
       } catch (error) {
         const wsError = new EnSyncError(error, "EnSyncConnectionError");
-        console.error(`${SERVICE_NAME} Connection error - ${error}`);
+        this.#logError(`${SERVICE_NAME} Connection error - ${error}`);
         reject(wsError);
       }
     });
@@ -426,7 +469,7 @@ class EnSyncEngine {
       if (!this.#subscriptions.has(eventName)) {
         this.#subscriptions.set(eventName, new Set());
       }
-      console.log(`${SERVICE_NAME} Successfully subscribed to ${eventName}`);
+      this.#log(`${SERVICE_NAME} Successfully subscribed to ${eventName}`);
       return {
         on: (handler) => this.#on(eventName, handler, options.appSecretKey, options.autoAck),
         ack: (eventIdem, block) => this.#ack(eventIdem, block, eventName),
@@ -487,7 +530,7 @@ class EnSyncEngine {
 
     if (response.startsWith("+PASS:")) {
       this.#subscriptions.delete(eventName);
-      console.log(`${SERVICE_NAME} Successfully unsubscribed from ${eventName}`);
+      this.#log(`${SERVICE_NAME} Successfully unsubscribed from ${eventName}`);
     } else {
       throw new EnSyncError(`Unsubscribe failed: ${response}`, "EnSyncSubscriptionError");
     }
@@ -506,7 +549,7 @@ class EnSyncEngine {
       const decryptionKey = appSecretKey || this.#config.appSecretKey || this.#config.clientHash;
 
       if (!decryptionKey) {
-        console.error(`${SERVICE_NAME} No decryption key available`);
+        this.#logError(`${SERVICE_NAME} No decryption key available`);
         return { success: false };
       }
 
@@ -540,14 +583,14 @@ class EnSyncEngine {
             break; // Successfully decrypted, exit the loop
           } catch (error) {
             // This key didn't work, try the next one
-            console.debug(
+            this.#logDebug(
               `${SERVICE_NAME} Couldn't decrypt with recipient ID ${recipientId}: ${error.message}`
             );
           }
         }
 
         if (!decrypted) {
-          console.error(
+          this.#logError(
             `${SERVICE_NAME} Failed to decrypt hybrid message with any of the ${recipientIds.length} recipient keys`
           );
           return { success: false };
@@ -562,7 +605,7 @@ class EnSyncEngine {
 
       return { success: true, payload };
     } catch (decryptError) {
-      console.error(`${SERVICE_NAME} Failed to decrypt with key -`, decryptError);
+      this.#logError(`${SERVICE_NAME} Failed to decrypt with key -`, decryptError);
       return { success: false };
     }
   }
@@ -588,7 +631,7 @@ class EnSyncEngine {
             record.encryptedPayload = encryptedPayload;
             record.payload = null; // Will be decrypted by handlers
           } catch (e) {
-            console.error(`${SERVICE_NAME} Failed to process event payload:`, e);
+            this.#logError(`${SERVICE_NAME} Failed to process event payload:`, e);
             return null;
           }
         }
@@ -606,7 +649,7 @@ class EnSyncEngine {
       }
       return null;
     } catch (e) {
-      console.error(`${SERVICE_NAME} Failed to parse event message:`, e);
+      this.#logError(`${SERVICE_NAME} Failed to parse event message:`, e);
       return null;
     }
   }
@@ -702,12 +745,12 @@ class EnSyncEngine {
    * @private
    */
   async #authenticate() {
-    console.log(`${SERVICE_NAME} Sending authentication message...`);
+    this.#log(`${SERVICE_NAME} Sending authentication message...`);
     const authMessage = `CONN;ACCESS_KEY=:${this.#config.accessKey}`;
     const response = await this.#sendMessage(authMessage);
 
     if (response.startsWith("+PASS:")) {
-      console.log(`${SERVICE_NAME} Authentication successful`);
+      this.#log(`${SERVICE_NAME} Authentication successful`);
       const content = response.replace("+PASS:", "");
       const resp = this.#convertKeyValueToObject(content);
       this.#config.clientId = resp.clientId;
@@ -736,7 +779,7 @@ class EnSyncEngine {
       // Resubscribe to each event and restore its handlers
       for (const [eventName, handlers] of currentSubscriptions.entries()) {
         try {
-          console.log(`${SERVICE_NAME} Resubscribing to ${eventName}`);
+          this.#log(`${SERVICE_NAME} Resubscribing to ${eventName}`);
           await this.subscribe(eventName);
 
           // Restore all handlers for this event
@@ -746,7 +789,7 @@ class EnSyncEngine {
             });
           }
         } catch (error) {
-          console.error(`${SERVICE_NAME} Failed to resubscribe to ${eventName}:`, error);
+          this.#logError(`${SERVICE_NAME} Failed to resubscribe to ${eventName}:`, error);
         }
       }
       return response;
@@ -765,7 +808,7 @@ class EnSyncEngine {
 
       const timeout = setTimeout(() => {
         this.#messageCallbacks.delete(messageId);
-        console.log(`${SERVICE_NAME} Message timeout for request: ${message.substring(0, 30)}...`);
+        this.#log(`${SERVICE_NAME} Message timeout for request: ${message.substring(0, 30)}...`);
         reject(new EnSyncError("Message timeout", "EnSyncTimeoutError"));
       }, 30000); // Increased timeout to 30 seconds
 
@@ -810,7 +853,7 @@ class EnSyncEngine {
               const processedEvent = this.#parseAndDecryptEvent(message, appSecretKey);
 
               if (!processedEvent || !processedEvent.payload) {
-                console.error(`${SERVICE_NAME} Failed to process event for handler`);
+                this.#logError(`${SERVICE_NAME} Failed to process event for handler`);
                 return; // Skip this handler if processing fails
               }
 
@@ -818,7 +861,7 @@ class EnSyncEngine {
               const result = handler(processedEvent);
               if (result instanceof Promise) {
                 await result.catch((error) => {
-                  console.error(`${SERVICE_NAME} Async handler error -`, error);
+                  this.#logError(`${SERVICE_NAME} Async handler error -`, error);
                 });
               }
 
@@ -831,11 +874,11 @@ class EnSyncEngine {
                     processedEvent.eventName
                   );
                 } catch (err) {
-                  console.error(`${SERVICE_NAME} Auto-acknowledge error:`, err);
+                  this.#logError(`${SERVICE_NAME} Auto-acknowledge error:`, err);
                 }
               }
             } catch (e) {
-              console.error(`${SERVICE_NAME} Event handler error -`, e);
+              this.#logError(`${SERVICE_NAME} Event handler error -`, e);
             }
           })();
         }
@@ -887,7 +930,7 @@ class EnSyncEngine {
     this.#state.isAuthenticated = false;
     this.#clearTimers();
 
-    console.log(
+    this.#log(
       `${SERVICE_NAME} WebSocket closed with code ${code || "unknown"}, reason: ${reason || "none provided"}`
     );
 
@@ -909,7 +952,7 @@ class EnSyncEngine {
       this.#state.reconnectAttempts++;
       const delay =
         this.#config.reconnectInterval * Math.pow(1.5, this.#state.reconnectAttempts - 1);
-      console.log(
+      this.#log(
         `${SERVICE_NAME} Attempting reconnect ${this.#state.reconnectAttempts}/${this.#config.maxReconnectAttempts} in ${delay}ms...`
       );
 
@@ -921,11 +964,11 @@ class EnSyncEngine {
           // Notify reconnect handlers after successful reconnection
           this.#eventHandlers.reconnect.forEach((handler) => handler());
         } catch (error) {
-          console.error(`${SERVICE_NAME} Reconnection attempt failed:`, error);
+          this.#logError(`${SERVICE_NAME} Reconnection attempt failed:`, error);
         }
       }, delay);
     } else if (this.#state.reconnectAttempts >= this.#config.maxReconnectAttempts) {
-      console.error(
+      this.#logError(
         `${SERVICE_NAME} Maximum reconnection attempts (${this.#config.maxReconnectAttempts}) reached. Giving up.`
       );
     }
@@ -1032,7 +1075,7 @@ class EnSyncEngine {
         // Add the decrypted payload to the event data
         eventData.payload = decryptionResult.payload;
       } else {
-        console.warn(`${SERVICE_NAME} Could not decrypt event payload`);
+        this.#logWarn(`${SERVICE_NAME} Could not decrypt event payload`);
       }
     }
 
