@@ -1,13 +1,9 @@
 {
   "name": "ensync-client-sdk",
-  "version": "0.1.2",
-  "description": "Client SDK for EnSync Engine - gRPC and WebSocket support",
+  "version": "0.2.0",
+  "description": "gRPC client for EnSync Engine - High-performance message-driven communication",
   "main": "grpc.js",
-  "exports": {
-    ".": "./grpc.js",
-    "./websocket": "./websocket.js",
-    "./grpc": "./grpc.js"
-  },
+  "types": "index.d.ts",
   "scripts": {
     "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{js,jsx,ts,tsx,json,md}\"",
@@ -20,33 +16,27 @@
   "keywords": [
     "ensync",
     "grpc",
-    "websocket",
-    "event-driven",
+    "message-driven",
     "messaging",
     "real-time",
-    "pub-sub"
+    "pub-sub",
+    "event-driven"
   ],
   "author": "EnSync Team",
   "license": "ISC",
   "files": [
     "grpc.js",
-    "websocket.js",
-    "error.js",
-    "ecc-crypto.js",
+    "message-builder.js",
+    "index.d.ts",
     "ensync.proto",
     "README.md",
-    "GRPC_README.md",
-    "Sample.md",
-    "Doc.md"
+    "CHANGELOG.md",
+    "API.md"
   ],
   "dependencies": {
     "@grpc/grpc-js": "^1.14.0",
     "@grpc/proto-loader": "^0.7.15",
-    "ed2curve": "^0.3.0",
-    "jsdoc": "^4.0.4",
-    "tweetnacl": "^1.0.3",
-    "tweetnacl-util": "^0.15.1",
-    "ws": "^8.18.3"
+    "ensync-utils": "^0.1.0"
   },
   "devDependencies": {
     "prettier": "^3.2.5"

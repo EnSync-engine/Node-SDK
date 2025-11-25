@@ -1,13 +1,10 @@
-# EnSync Node.js SDK
+# Node SDK
 
-The official Node.js SDK for [EnSync](https://ensync.cloud) - a high-performance message-driven integration engine.
+---
 
-## 🔗 Resources
+## Full Documentation
 
-- **Website**: [ensync.cloud](https://ensync.cloud)
-- **Documentation**: [docs.ensync.cloud](https://docs.ensync.cloud/sdk/node)
-- **npm Package**: [ensync-client-sdk](https://www.npmjs.com/package/ensync-client-sdk)
-- **GitHub**: [EnSync-engine/Node-SDK](https://github.com/EnSync-engine/Node-SDK)
+This is the client [SDK](https://www.npmjs.com/package/ensync-client-sdk) for [EnSync engine](https://ensync.cloud) (message delivery engine) that enables you to build an ecosystem of connected devices and services.
 
 ---
 
@@ -27,11 +24,10 @@ npm install ensync-client-sdk
 
 ```javascript
 // Import the default engine class (gRPC)
-const { EnSyncEngine } = require("ensync-client-sdk");
+const { EnSyncEngine } = require('ensync-client-sdk');
 
 // Production - uses secure TLS on port 443 by default
 const engine = new EnSyncEngine("grpcs://node.gms.ensync.cloud");
-// Alternative Websocket: const engine = new EnSyncEngine("wss://node.gms.ensync.cloud");
 
 // Development - uses insecure connection on port 50051 by default
 // const engine = new EnSyncEngine("localhost");
@@ -40,7 +36,18 @@ const engine = new EnSyncEngine("grpcs://node.gms.ensync.cloud");
 const client = await engine.createClient("your-app-key");
 ```
 
-Both clients provide the same API for publishing and subscribing to messages.
+#### WebSocket Alternative
+
+```javascript
+// Import the WebSocket engine class
+const { EnSyncEngine } = require('ensync-client-sdk/websocket');
+
+// Initialize WebSocket client
+const engine = new EnSyncEngine("wss://node.gms.ensync.cloud");
+const client = await engine.createClient("your-app-key");
+```
+
+Both clients provide the same API for publishing and subscribing to events.
 
 **gRPC Connection Options:**
 
@@ -67,20 +74,19 @@ const engine = new EnSyncEngine(url, options);
 
 #### Parameters
 
-| Parameter | Type     | Required | Description                  |
-| --------- | -------- | -------- | ---------------------------- |
-| `url`     | `string` | Yes      | The URL of the EnSync server |
-| `options` | `object` | No       | Configuration options        |
+| Parameter | Type     | Required | Description                      |
+| --------- | -------- | -------- | -------------------------------- |
+| `url`     | `string` | Yes      | The URL of the EnSync server     |
+| `options` | `object` | No       | Configuration options            |
 
 **Options Object:**
 
-| Option                 | Type      | Default | Description                     |
-| ---------------------- | --------- | ------- | ------------------------------- |
-| `heartbeatInterval`    | `number`  | `30000` | Heartbeat interval in ms (gRPC) |
-| `pingInterval`         | `number`  | `30000` | Ping interval in ms (WebSocket) |
-| `reconnectInterval`    | `number`  | `5000`  | Reconnection interval in ms     |
-| `maxReconnectAttempts` | `number`  | `5`     | Maximum reconnection attempts   |
-| `enableLogging`        | `boolean` | `false` | Enable/disable SDK console logs |
+| Option                   | Type     | Default | Description                                |
+| ------------------------ | -------- | ------- | ------------------------------------------ |
+| `heartbeatInterval`      | `number` | `30000` | Heartbeat interval in ms (gRPC)            |
+| `pingInterval`           | `number` | `30000` | Ping interval in ms (WebSocket)            |
+| `reconnectInterval`      | `number` | `5000`  | Reconnection interval in ms                |
+| `maxReconnectAttempts`   | `number` | `5`     | Maximum reconnection attempts              |
 
 ---
 
@@ -95,26 +101,20 @@ const engine = new EnSyncEngine("grpcs://node.gms.ensync.cloud");
 
 // Create a client
 const client = await engine.createClient("your-app-key");
-
-// With options (e.g., enable logging for debugging)
-const engineVerbose = new EnSyncEngine("grpcs://node.gms.ensync.cloud", {
-  enableLogging: true, // Enable SDK console logs for debugging
-});
-const clientVerbose = await engineVerbose.createClient("your-app-key");
 ```
 
 #### Client Creation Parameters
 
-| Parameter | Type     | Required | Description                  |
-| --------- | -------- | -------- | ---------------------------- |
-| `appKey`  | `string` | Yes      | Your EnSync application key  |
-| `options` | `object` | No       | Client configuration options |
+| Parameter | Type     | Required | Description                      |
+| --------- | -------- | -------- | -------------------------------- |
+| `appKey`  | `string` | Yes      | Your EnSync application key      |
+| `options` | `object` | No       | Client configuration options     |
 
 **Options Object:**
 
-| Option         | Type     | Default | Description                                   |
-| -------------- | -------- | ------- | --------------------------------------------- |
-| `appSecretKey` | `string` | `null`  | Default key used to decrypt incoming messages |
+| Option          | Type     | Default | Description                                    |
+| --------------- | -------- | ------- | ---------------------------------------------- |
+| `appSecretKey`  | `string` | `null`  | Default key used to decrypt incoming messages  |
 
 #### Client Returns
 
@@ -122,20 +122,20 @@ Returns a new `EnSyncClient` instance
 
 ---
 
-### Publishing Messages
+### Publishing Events
 
 ```javascript
 // Basic publish
 await client.publish(
-  "company/service/action", // Message name
-  ["recipientPublicKey"], // Recipients (base64 public keys)
-  { data: "your payload" } // Message payload (must be valid JSON)
+  "company/service/event-type", // Event name
+  ["appId"], // Recipients (appIds of receiving parties)
+  { data: "your payload" } // Event payload
 );
 
 // With optional parameters
 await client.publish(
-  "company/service/action",
-  ["recipientPublicKey"], // Base64 encoded public key
+  "company/service/event-type",
+  ["appId"], // The appId of the receiving party
   { data: "your payload" },
   { persist: true, headers: { source: "order-system" } }
 );
@@ -143,266 +143,91 @@ await client.publish(
 
 #### Publish Parameters
 
-| Parameter    | Type       | Required | Description                                                  |
-| ------------ | ---------- | -------- | ------------------------------------------------------------ |
-| `messageName`| `string`   | Yes      | Name of the message (e.g., "company/service/action")        |
-| `recipients` | `string[]` | Yes      | Array of recipient public keys (base64 encoded)              |
-| `payload`    | `object`   | Yes      | Your message data (must be valid JSON)                       |
-| `metadata`   | `object`   | No       | Control message persistence and add custom headers           |
+| Parameter   | Type       | Required | Description                                              |
+| ----------- | ---------- | -------- | -------------------------------------------------------- |
+| `eventName` | `string`   | Yes      | Name of the event (e.g., "company/service/event-type")   |
+| `recipients`| `string[]` | Yes      | Array of appIds (the appIds of receiving parties)        |
+| `payload`   | `object`   | Yes      | Your event data (any JSON-serializable object)           |
+| `metadata`  | `object`   | No       | Control event persistence and add custom headers         |
 
 **Metadata Object:**
 
-| Option    | Type      | Default | Description                                  |
-| --------- | --------- | ------- | -------------------------------------------- |
-| `persist` | `boolean` | `false` | Whether to persist the message on the server |
-| `headers` | `object`  | `{}`    | Custom headers to include with the message   |
+| Option    | Type      | Default | Description                                    |
+| --------- | --------- | ------- | ---------------------------------------------- |
+| `persist` | `boolean` | `false` | Whether to persist the event on the server     |
+| `headers` | `object`  | `{}`    | Custom headers to include with the event       |
 
 ---
 
-### Subscribing to Messages
+### Subscribing to Events
 
 ```javascript
 // Basic subscription
-const subscription = await client.subscribe("company/service/action");
+const subscription = await client.subscribe("company/service/event-type");
 
-// Set up message handler
-subscription.on(async (message) => {
-  console.log("Received message:", message.payload);
-  // Process the message
+// Set up event handler
+subscription.on(async (event) => {
+  console.log("Received event:", event.payload);
+  // Process the event
 });
 
 // With options
-const subscription = await client.subscribe("company/service/action", {
-  autoAck: false, // Manual acknowledgment
-  appSecretKey: process.env.CUSTOM_DECRYPT_KEY, // Custom decryption key
+const subscription = await client.subscribe("company/service/event-type", {
+  autoAck: false,  // Manual acknowledgment
+  appSecretKey: process.env.CUSTOM_DECRYPT_KEY  // Custom decryption key
 });
 ```
 
 #### Subscribe Parameters
 
-| Parameter     | Type     | Required | Description                         |
-| ------------- | -------- | -------- | ----------------------------------- |
-| `messageName` | `string` | Yes      | Name of the message to subscribe to |
-| `options`     | `object` | No       | Subscription options                |
+| Parameter   | Type     | Required | Description                          |
+| ----------- | -------- | -------- | ------------------------------------ |
+| `eventName` | `string` | Yes      | Name of the event to subscribe to    |
+| `options`   | `object` | No       | Subscription options                 |
 
 **Options Object:**
 
-| Option         | Type      | Default | Description                                           |
-| -------------- | --------- | ------- | ----------------------------------------------------- |
-| `autoAck`      | `boolean` | `true`  | Set to false for manual acknowledgment                |
-| `appSecretKey` | `string`  | `null`  | Custom decryption key for this subscription (optional)|
+| Option          | Type      | Default | Description                                    |
+| --------------- | --------- | ------- | ---------------------------------------------- |
+| `autoAck`       | `boolean` | `true`  | Set to false for manual acknowledgment        |
+| `appSecretKey`  | `string`  | `null`  | Custom decryption key for this subscription    |
 
 #### Subscription Methods
 
-The subscription object provides several methods for message handling and flow control:
-
-##### **on(handler)** - Add Message Handler
-
 ```javascript
-subscription.on(async (message) => {
-  console.log("Received:", message.payload);
-  // Process message...
-});
-```
+// Handle incoming events
+async function handleEvent(event) {
+  // process event
+}
 
-##### **ack(messageIdem, block)** - Acknowledge Message
+subscription.on(handleEvent);
 
-Manually acknowledge a message after successful processing (when `autoAck: false`).
+// Manually acknowledge an event
+await subscription.ack(event.idem, event.block);
 
-```javascript
-await subscription.ack(message.idem, message.block);
-```
+// Request a specific event to be replayed
+const eventData = await subscription.replay("event-idem-123");
 
-**Parameters:**
-- `messageIdem` (string): Unique message identifier
-- `block` (string): Block identifier from the message
-
-**Returns:** Promise<string> - Acknowledgment confirmation
-
----
-
-##### **defer(messageIdem, delayMs, reason)** - Defer Message
-
-Defer a message for later redelivery. Useful for temporary failures or rate limiting.
-
-```javascript
-// Defer for 5 seconds
-await subscription.defer(message.idem, 5000, "Database temporarily unavailable");
-
-// Defer for 1 minute
-await subscription.defer(message.idem, 60000, "Rate limit exceeded");
-```
-
-**Parameters:**
-- `messageIdem` (string): Unique message identifier
-- `delayMs` (number): Delay in milliseconds before redelivery
-- `reason` (string): Optional reason for deferral
-
-**Returns:** Promise<object> - Defer response with delivery time
-
-**Use Cases:**
-- Temporary service unavailability
-- Rate limiting
-- Retry logic with backoff
-- Resource contention
-
----
-
-##### **discard(messageIdem, reason)** - Discard Message
-
-Permanently discard a message that cannot be processed. The message will not be redelivered.
-
-```javascript
-await subscription.discard(message.idem, "Invalid data format");
-await subscription.discard(message.idem, "Duplicate message");
-```
-
-**Parameters:**
-- `messageIdem` (string): Unique message identifier
-- `reason` (string): Reason for discarding the message
-
-**Returns:** Promise<object> - Discard confirmation
-
-**Use Cases:**
-- Invalid or malformed data
-- Duplicate messages
-- Messages that violate business rules
-- Poison messages that cause repeated failures
-
----
-
-##### **replay(messageIdem)** - Replay Message
-
-Request a specific message to be replayed/redelivered by its identifier.
-
-```javascript
-const messageData = await subscription.replay("message-idem-123");
-console.log("Replayed message:", messageData.payload);
-```
-
-**Parameters:**
-- `messageIdem` (string): Unique message identifier to replay
-
-**Returns:** Promise<EnSyncMessage> - The replayed message data
-
-**Use Cases:**
-- Retrieve historical messages
-- Reprocess specific messages
-- Audit and debugging
-- Data recovery
-
----
-
-##### **pause(reason)** - Pause Message Delivery
-
-Temporarily pause message delivery for this subscription. No new messages will be delivered until resumed.
-
-```javascript
-await subscription.pause("Performing maintenance");
-await subscription.pause("System overload");
-```
-
-**Parameters:**
-- `reason` (string): Optional reason for pausing
-
-**Returns:** Promise<object> - Pause confirmation
-
-**Use Cases:**
-- Scheduled maintenance
-- System overload/backpressure
-- Batch processing
-- Graceful degradation
-
----
-
-##### **resume()** - Resume Message Delivery
-
-Resume message delivery after a pause.
-
-```javascript
-await subscription.resume();
-```
-
-**Returns:** Promise<object> - Resume confirmation
-
----
-
-##### **unsubscribe()** - Stop Receiving Messages
-
-Unsubscribe from the message stream and clean up resources.
-
-```javascript
+// Stop receiving events
 await subscription.unsubscribe();
 ```
 
-**Returns:** Promise<void>
-
 ---
 
-#### Complete Flow Control Example
+### Event Structure
 
-```javascript
-const subscription = await client.subscribe("orders/process", {
-  autoAck: false
-});
-
-let processingCount = 0;
-const MAX_CONCURRENT = 10;
-
-subscription.on(async (message) => {
-  // Check if we're at capacity
-  if (processingCount >= MAX_CONCURRENT) {
-    await subscription.pause("Max concurrent processing reached");
-    return;
-  }
-
-  processingCount++;
-
-  try {
-    // Process the order
-    await processOrder(message.payload);
-    
-    // Acknowledge successful processing
-    await subscription.ack(message.idem, message.block);
-  } catch (error) {
-    if (error.code === "TEMPORARY_ERROR") {
-      // Defer for retry
-      await subscription.defer(message.idem, 30000, error.message);
-    } else if (error.code === "INVALID_DATA") {
-      // Discard permanently
-      await subscription.discard(message.idem, error.message);
-    } else {
-      // Unknown error, defer with longer delay
-      await subscription.defer(message.idem, 120000, "Unknown error");
-    }
-  } finally {
-    processingCount--;
-    
-    // Resume if we have capacity
-    if (processingCount < MAX_CONCURRENT) {
-      await subscription.resume();
-    }
-  }
-});
-```
-
----
-
-### Message Structure
-
-When you receive a message through a subscription handler, it contains:
+When you receive an event through a subscription handler, it contains:
 
 ```javascript
 {
-  messageName: "company/service/action",  // Message name
-  idem: "abc123",                         // Unique message ID (use with ack/discard/replay)
-  block: "456",                           // Block ID (use with ack)
-  payload: { /* your data */ },           // Your decrypted JSON data
-  timestamp: 1634567890123,               // Message timestamp (milliseconds)
-  metadata: {                             // Optional metadata
-    headers: { /* custom headers */ }
+  idem: "abc123",                // Unique event ID (use with ack/discard/replay)
+  block: "456",                  // Block ID (use with ack)
+  eventName: "company/service/event-type",  // Event name
+  payload: { /* your data */ },  // Your decrypted data
+  timestamp: 1634567890123,      // Event timestamp (milliseconds)
+  metadata: {                    // Optional metadata
   },
-  sender: "base64-encoded-public-key"    // Sender's public key
+  sender: "base64-encoded-public-key"  // Sender's public key (or null)
 }
 ```
 
@@ -446,12 +271,12 @@ try {
 
 Common error types:
 
-| Error Type                | Description                         |
-| ------------------------- | ----------------------------------- |
-| `EnSyncConnectionError`   | Connection or authentication issues |
-| `EnSyncPublishError`      | Problems publishing events          |
-| `EnSyncSubscriptionError` | Subscription-related errors         |
-| `EnSyncGenericError`      | Other errors                        |
+| Error Type                  | Description                          |
+| --------------------------- | ------------------------------------ |
+| `EnSyncConnectionError`     | Connection or authentication issues  |
+| `EnSyncPublishError`        | Problems publishing events           |
+| `EnSyncSubscriptionError`   | Subscription-related errors          |
+| `EnSyncGenericError`        | Other errors                         |
 
 ---
 
@@ -503,7 +328,6 @@ quickStart();
 ```
 
 > **Note:** This example uses environment variables for security. Create a `.env` file with:
->
 > ```
 > ENSYNC_APP_KEY=your_app_key_here
 > ENSYNC_SECRET_KEY=your_secret_key_here
@@ -711,7 +535,6 @@ The replay command returns the complete event object with its payload:
   idem: "event-idem-123",
   block: "81404",
   metadata: {
-    headers: {},
     $internal: {
       replay_info: {
         isReplayed: true,

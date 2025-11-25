@@ -43,7 +43,7 @@ const grpcEngine = new EnSyncEngine("grpc://localhost:50051", {
 });
 
 // Create gRPC client with secure TLS connection
-const secureEngine = new EnSyncEngine("grpcs://node.ensync.cloud:50051", {
+const secureEngine = new EnSyncEngine("grpcs://node.gms.ensync.cloud", {
   heartbeatInterval: 15000,
   maxReconnectAttempts: 3,
 });
@@ -125,7 +125,7 @@ new EnSyncEngine(url, options);
 
 - `url` (string): gRPC server URL
   - Use `grpc://` for insecure connections (e.g., `grpc://localhost:50051`)
-  - Use `grpcs://` for secure TLS connections (e.g., `grpcs://node.ensync.cloud:50051`)
+  - Use `grpcs://` for secure TLS connections (e.g., `grpcs://node.gms.ensync.cloud`)
   - Plain address without scheme defaults to insecure (e.g., `localhost:50051`)
 - `options` (object):
   - `heartbeatInterval` (number): Heartbeat interval in ms (default: 30000)

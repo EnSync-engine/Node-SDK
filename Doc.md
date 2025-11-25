@@ -4,7 +4,7 @@
 
 ## Full Documentation
 
-This is the client SDK for [EnSync engine](https://ensync.cloud) (event-delivery based integration engine) that enables you to integrate with third-party apps as though they were native to your system and in realtime.
+This is the client SDK for [EnSync engine](https://ensync.cloud) - a high-performance message-driven integration engine that enables you to integrate with third-party apps as though they were native to your system and in realtime.
 
 See [Documentation on EnSync Engine](https://docs.tryensync.com/introduction.html).  
 See [Documentation on Our SDKs](https://docs.tryensync.com/sdk.html).
@@ -50,6 +50,7 @@ const engine = new EnSyncEngine(url, options);
   - `disableTls` (boolean): Set to true to disable TLS (default: false)
   - `reconnectInterval` (number): Reconnection interval in ms (default: 5000)
   - `maxReconnectAttempts` (number): Maximum reconnection attempts (default: 10)
+  - `enableLogging` (boolean): Enable/disable SDK console logs (default: false)
 
 #### Events
 
@@ -62,16 +63,16 @@ const engine = new EnSyncEngine(url, options);
 ### Creating a Client
 
 - Initialize the engine with your server URL
-- Create a client with your access key
+- Create a client with your app key
 
 ```javascript
-const engine = new EnSyncEngine("https://node.ensync.cloud");
-const client = await engine.createClient("your-access-key");
+const engine = new EnSyncEngine("grpcs://node.gms.ensync.cloud");
+const client = await engine.createClient("your-app-key");
 ```
 
 #### Client Parameters
 
-- `accessKey` (string): Your EnSync access key
+- `appKey` (string): Your EnSync application key (formerly accessKey)
 - `options` (object, optional):
   - `appSecretKey` (string): Application secret key for enhanced security
   - `clientId` (string): Custom client ID (default: auto-generated UUID)
@@ -82,36 +83,37 @@ Returns a new EnSyncClient instance
 
 ---
 
-### Publishing Events
+### Publishing Messages
 
 ```javascript
 await client.publish(
-  "event/name", // Event name
-  ["recipient-id"], // Recipients
-  { data: "payload" } // Event payload
+  "orders/created", // Message name
+  ["recipient-public-key"], // Recipients
+  { orderId: "123", amount: 99.99 }, // Message payload (JSON)
+  { persist: true } // Metadata
 );
 ```
 
 #### Publish Parameters
 
-- `eventName` (string): Name of the event to publish
-- `recipients` (array): Array of recipient IDs
-- `payload` (object): Event data payload
+- `messageName` (string): Name of the message to publish
+- `recipients` (array): Array of recipient public keys (base64)
+- `payload` (object): Message data payload (must be valid JSON)
 - `options` (object, optional):
   - `appSecretKey` (string): Application secret key
   - `ttl` (number): Time-to-live in seconds (default: 3600)
 
 ---
 
-### Subscribing to Events
+### Subscribing to Messages
 
 ```javascript
-const subscription = await client.subscribe(eventName, options);
+const subscription = await client.subscribe(messageName, options);
 ```
 
 #### Subscribe Parameters
 
-- `eventName` (string): Name of the event to subscribe to
+- `messageName` (string): Name of the message to subscribe to
 - `options` (object, optional):
   - `appSecretKey` (string): Application secret key
   - `autoAck` (boolean): Automatically acknowledge events (default: true)
@@ -123,27 +125,30 @@ Returns a subscription object with the following methods:
 
 ```typescript
 {
-  on: (callback: (record: EnSyncEventPayload) => Promise<void>) => void;
-  ack: (eventId: string, block: string) => Promise<string>;
-  rollback: (eventId: string, block: string) => Promise<string>;
-  unsubscribe: () => Promise<string>;
+  on: (callback: (message: EnSyncMessage) => Promise<void>) => void;
+  ack: (messageIdem: string, block: string) => Promise<string>;
+  defer: (messageIdem: string, delayMs: number, reason: string) => Promise<object>;
+  discard: (messageIdem: string, reason: string) => Promise<object>;
+  replay: (messageIdem: string) => Promise<object>;
+  pause: (reason: string) => Promise<object>;
+  resume: () => Promise<object>;
+  unsubscribe: () => Promise<void>;
 }
 ```
 
 ---
 
-### Event Structure
+### Message Structure
 
 ```javascript
 {
-  id: "event-id",                // Unique event ID
-  block: "block-id",             // Block ID for acknowledgment
-  data: { /* payload */ },       // User-defined payload
-  timestamp: 1634567890123,      // Event timestamp
-  metadata: {                    // Metadata object
-    sender: "sender-id"          // Sender client ID (if available)
-  },
-  eventName: "event/name"        // Name of the event
+  messageName: "orders/created",    // Message name
+  idem: "msg-123",                  // Unique message ID
+  block: "456",                     // Block ID for acknowledgment
+  timestamp: 1634567890123,         // Message timestamp
+  payload: { /* your data */ },     // Decrypted JSON payload
+  metadata: { /* metadata */ },     // Message metadata
+  sender: "base64-public-key"       // Sender's public key
 }
 ```
 
@@ -196,27 +201,32 @@ Common error types:
 
 ## Complete Examples
 
-### Event Producer
+### Message Producer
 
 ```javascript
 const { EnSyncEngine } = require("ensync-client-sdk");
 
 const response = async () => {
   try {
-    const eventName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL";
-    const engine = new EnSyncEngine("https://localhost:8443", {
-      disableTls: true,
+    const messageName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL";
+    const engine = new EnSyncEngine("grpc://localhost:50051");
+
+    const client = await engine.createClient(appKey, {
+      appSecretKey: secretKey
     });
 
-    const client = await engine.createClient("your-access-key");
-
-    // Payload is user-defined
-    await client.publish(eventName, ["recipient-id"], {
-      transactionId: "123",
-      amount: 100,
-      terminal: "pos-1",
-      timestamp: Date.now(),
-    });
+    // Payload must be valid JSON
+    await client.publish(
+      messageName,
+      [recipientPublicKey],
+      {
+        transactionId: "123",
+        amount: 100,
+        terminal: "pos-1",
+        timestamp: Date.now(),
+      },
+      { persist: true }
+    );
 
     await client.destroy();
   } catch (e) {
@@ -227,30 +237,31 @@ const response = async () => {
 
 ---
 
-### Event Subscriber
+### Message Subscriber
 
 ```javascript
 const { EnSyncEngine } = require("ensync-client-sdk");
 
 const response = async () => {
   try {
-    const eventName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL";
-    const engine = new EnSyncEngine("https://localhost:8443", {
-      disableTls: true,
+    const messageName = "yourcompany/payment/POS/PAYMENT_SUCCESSFUL";
+    const engine = new EnSyncEngine("grpc://localhost:50051");
+
+    const client = await engine.createClient(appKey, {
+      appSecretKey: secretKey
     });
+    const subscription = await client.subscribe(messageName);
 
-    const client = await engine.createClient("your-access-key");
-    const subscription = await client.subscribe(eventName);
-
-    subscription.on(async (event) => {
+    subscription.on(async (message) => {
       try {
-        // event is an EnSyncEventPayload
-        console.log("Event ID:", event.id);
-        console.log("Event Block:", event.block);
-        console.log("Event Data:", event.data); // Contains the user-defined payload
-        console.log("Event Timestamp:", event.timestamp);
+        // message is an EnSyncMessage
+        console.log("Message Name:", message.messageName);
+        console.log("Message ID:", message.idem);
+        console.log("Message Block:", message.block);
+        console.log("Message Payload:", message.payload); // Decrypted JSON payload
+        console.log("Message Timestamp:", message.timestamp);
 
-        await subscription.ack(event.id, event.block);
+        await subscription.ack(message.idem, message.block);
         await subscription.unsubscribe();
       } catch (e) {
         console.error("Processing error:", e);
@@ -277,7 +288,9 @@ const response = async () => {
 require("dotenv").config();
 
 const engine = new EnSyncEngine(process.env.ENSYNC_URL);
-const client = await engine.createClient(process.env.ENSYNC_ACCESS_KEY);
+const client = await engine.createClient(process.env.ENSYNC_APP_KEY, {
+  appSecretKey: process.env.APP_SECRET_KEY
+});
 
 // Implement proper error handling and reconnection
 engine.on("disconnect", () => {
@@ -291,33 +304,50 @@ process.on("SIGINT", async () => {
 });
 ```
 
-### Event Design
+### Message Design
 
-- Use hierarchical event names (e.g., `domain/entity/action`)
-- Keep payloads concise and well-structured
-- Consider versioning your event schemas
+- Use hierarchical message names (e.g., `domain/entity/action`)
+- Keep payloads concise and well-structured as valid JSON
+- Consider versioning your message schemas
+- Use JSON schema validation for critical messages
 
 ```javascript
-// Good event naming pattern
-await client.publish("inventory/product/created", ["warehouse-service"], {
-  productId: "prod-123",
-  name: "Ergonomic Chair",
-  sku: "ERG-CH-BLK",
-  price: 299.99,
-  createdAt: Date.now(),
-});
+// Good message naming pattern
+await client.publish(
+  "inventory/product/created",
+  [recipientPublicKey],
+  {
+    productId: "prod-123",
+    name: "Ergonomic Chair",
+    sku: "ERG-CH-BLK",
+    price: 299.99,
+    createdAt: Date.now(),
+  },
+  { persist: true },
+  {
+    schema: {
+      productId: "string",
+      name: "string",
+      sku: "string",
+      price: "double",
+      createdAt: "long"
+    }
+  }
+);
 ```
 
 ### Security Best Practices
 
-- Never hardcode access keys or secret keys
+- Never hardcode app keys or secret keys
 - Use environment variables or secure key management solutions
-- Implement proper authentication and authorization
-- Consider encrypting sensitive payloads
+- All messages are end-to-end encrypted using Ed25519
+- Hybrid encryption (AES + Ed25519) is used automatically for multi-recipient messages
+- Use `appSecretKey` for message decryption
 
 ### Performance Optimization
 
-- Batch events when possible instead of sending many small messages
+- Batch messages when possible instead of sending many small messages
+- Hybrid encryption is enabled by default for multi-recipient messages (improves performance 2-5x)
 - Consider message size and frequency in high-volume scenarios
-- Use appropriate TTL values for your use case
-- Implement proper error handling and retry logic
+- Use message persistence (`persist: true`) for critical messages
+- Implement proper error handling and retry logic with defer/replay

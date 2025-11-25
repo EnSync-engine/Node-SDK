@@ -1,5 +1,5 @@
 require("dotenv").config();
-const { EnSyncEngine } = require("../grpc");
+const { EnSyncEngine } = require("../packages/ensync-client-sdk/grpc");
 
 console.log("Starting gRPC subscriber test...");
 

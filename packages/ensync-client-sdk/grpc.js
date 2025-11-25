@@ -1,16 +1,23 @@
 const grpc = require("@grpc/grpc-js");
 const protoLoader = require("@grpc/proto-loader");
 const path = require("path");
-const { EnSyncError, GENERIC_MESSAGE } = require("./error");
+const EventEmitter = require("events");
 const naclUtil = require("tweetnacl-util");
 const {
+  EnSyncError,
+  GENERIC_MESSAGE,
   encryptEd25519,
   decryptEd25519,
   hybridEncrypt,
   hybridDecrypt,
   decryptMessageKey,
   decryptWithMessageKey,
-} = require("./ecc-crypto");
+  analyzePayload,
+  validatePayloadSchema,
+  getPayloadSchema,
+  isValidJson,
+} = require("ensync-utils");
+const { MessageBuilder } = require("./message-builder");
 
 const SERVICE_NAME = "EnSync:";
 const PROTO_PATH = path.join(__dirname, "ensync.proto");
@@ -26,14 +33,14 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 
 const ensyncProto = grpc.loadPackageDefinition(packageDefinition).ensync;
 
-class EnSyncEngine {
+class EnSyncEngine extends EventEmitter {
   /** @type {Object} */
   #client = null;
 
   /** @type {Object} */
   #config = {
     url: null,
-    accessKey: null,
+    appKey: null,
     clientId: null,
     clientHash: null,
     appSecretKey: null,
@@ -51,26 +58,23 @@ class EnSyncEngine {
     shouldReconnect: true,
   };
 
-  /** @type {Object.<string, Set<Function>>} */
-  #eventHandlers = {
-    message: new Set(),
-    error: new Set(),
-    reconnect: new Set(),
-    close: new Set(),
-  };
-
   /** @type {Map<string, Object>} */
   #subscriptions = new Map();
 
+  /** @type {Map<string, Set<Function>>} */
+  #messageHandlers = new Map();
+
   /**
    * Creates a new EnSync gRPC client
-   * @param {string} url - gRPC server URL (e.g., "grpc://localhost:50051" or "grpcs://node.ensync.cloud:50051")
+   * @param {string} url - gRPC server URL (e.g., "grpc://localhost:50051" or "grpcs://node.gms.ensync.cloud")
    * @param {Object} options - Configuration options
    * @param {number} [options.heartbeatInterval] - Heartbeat interval in ms (default: 30000)
    * @param {number} [options.maxReconnectAttempts] - Max reconnect attempts (default: 5)
    * @param {boolean} [options.enableLogging=false] - Enable/disable console logs (default: false)
    */
   constructor(url, options = {}) {
+    super();
+
     // Parse URL to determine if secure connection is needed
     let serverAddress = url;
     let useSecure = false;
@@ -100,32 +104,56 @@ class EnSyncEngine {
 
   /**
    * Creates a new gRPC client and authenticates
-   * @param {string} accessKey - The access key for authentication
+   * @param {string} appKey - The app key for authentication
    * @param {Object} options - Additional options
    * @param {string} [options.appSecretKey] - App secret key for decryption
    * @returns {Promise<EnSyncEngine>} A new EnSync gRPC client instance
    * @throws {EnSyncError} If client creation fails
    */
-  async createClient(accessKey, options = {}) {
-    this.#config.accessKey = accessKey;
+  async createClient(appKey, options = {}) {
+    this.#config.appKey = appKey;
     if (options.appSecretKey) this.#config.appSecretKey = options.appSecretKey;
     await this.#authenticate();
     return this;
   }
 
   /**
-   * Publishes an event to the EnSync system
-   * @param {string} eventName - Name of the event
+   * Creates a message builder for fluent API
+   * @param {string} messageName - Name of the message (created in EnSync UI)
+   * @returns {MessageBuilder} Message builder instance
+   */
+  message(messageName) {
+    return new MessageBuilder(this, messageName);
+  }
+
+  /**
+   * Publishes a message to the EnSync system (legacy method)
+   * @param {string} messageName - Name of the message
    * @param {string[]} recipients - Array of base64 encoded public keys of recipients
-   * @param {Object} payload - Event payload
-   * @param {Object} metadata - Event metadata
+   * @param {Object} payload - Message payload (must be valid JSON)
+   * @param {Object} metadata - Message metadata
    * @param {Object} [options] - Additional options
    * @param {boolean} [options.useHybridEncryption=true] - Whether to use hybrid encryption (default: true)
+   * @param {Object} [options.schema] - Optional JSON schema for payload validation
    * @returns {Promise<string>} Server response
    * @throws {EnSyncError} If publishing fails
    */
   async publish(
-    eventName,
+    messageName,
+    recipients = [],
+    payload = {},
+    metadata = { persist: true, headers: {} },
+    options = {}
+  ) {
+    return this._publishInternal(messageName, recipients, payload, metadata, options);
+  }
+
+  /**
+   * Internal publish method used by both legacy and builder APIs
+   * @private
+   */
+  async _publishInternal(
+    messageName,
     recipients = [],
     payload = {},
     metadata = { persist: true, headers: {} },
@@ -143,13 +171,30 @@ class EnSyncEngine {
       throw new EnSyncError("recipients array cannot be empty", "EnSyncAuthError");
     }
 
+    // Validate payload is valid JSON
+    if (!isValidJson(payload)) {
+      throw new EnSyncError("Payload must be valid JSON", "EnSyncValidationError");
+    }
+
+    // Validate against schema if provided
+    if (options.schema) {
+      const validation = validatePayloadSchema(payload, options.schema);
+      if (!validation.success) {
+        throw new EnSyncError(
+          `Payload validation failed: ${validation.errors.join(", ")}`,
+          "EnSyncValidationError"
+        );
+      }
+    }
+
     const useHybridEncryption = options.useHybridEncryption !== false; // Default to true
 
-    // Calculate payload metadata
-    const payloadMetadata = this.analyzePayload(payload);
+    // Calculate payload metadata with JSON schema
+    const payloadMetadata = analyzePayload(payload);
     const payloadMetadataString = JSON.stringify({
       byte_size: payloadMetadata.byteSize,
-      skeleton: payloadMetadata.skeleton,
+      skeleton: payloadMetadata.schema,
+      field_count: payloadMetadata.fieldCount,
     });
 
     try {
@@ -197,15 +242,16 @@ class EnSyncEngine {
       for (const { recipient, encryptedBase64 } of encryptedPayloads) {
         const request = {
           client_id: this.#config.clientId,
-          event_name: eventName,
+          message_name: messageName,
           payload: encryptedBase64,
           delivery_to: recipient,
           metadata: JSON.stringify(metadata),
           payload_metadata: payloadMetadataString,
+          payload_type: "application/json",
         };
 
-        const response = await this.#publishEvent(request);
-        responses.push(response.event_idem);
+        const response = await this.#publishMessage(request);
+        responses.push(response.message_idem);
       }
 
       return responses.join(",");
@@ -215,29 +261,37 @@ class EnSyncEngine {
   }
 
   /**
-   * Subscribes to an event
-   * @param {string} eventName - Name of the event to subscribe to
-   * @param {Object} options - Subscription options
-   * @param {boolean} [options.autoAck=false] - Whether to automatically acknowledge events
-   * @param {string} [options.appSecretKey=null] - App secret key for decrypting messages
-   * @returns {Promise<Object>} Subscription object with methods for event handling
+   * Subscribes to messages (EventEmitter-style)
+   * @param {string} messageName - Name of the message to subscribe to (e.g., "orders/created")
+   * @param {Function} [handler] - Optional message handler function
+   * @param {Object} [options] - Subscription options
+   * @param {boolean} [options.autoAck=true] - Whether to automatically acknowledge messages
+   * @param {string} [options.appSecretKey] - App secret key for decrypting messages
+   * @returns {Promise<Object>} Subscription object with methods for message handling
    * @throws {EnSyncError} If subscription fails
    */
-  async subscribe(eventName, options = { autoAck: true, appSecretKey: null }) {
+  async subscribe(messageName, handler, options) {
+    // Handle overloaded parameters: subscribe(name, handler, options) or subscribe(name, options)
+    if (typeof handler === "object" && !options) {
+      options = handler;
+      handler = null;
+    }
+
+    options = options || { autoAck: true, appSecretKey: null };
     if (!this.#state.isAuthenticated) {
       throw new EnSyncError("Not authenticated", "EnSyncAuthError");
     }
 
     const request = {
       client_id: this.#config.clientId,
-      event_name: eventName,
+      message_name: messageName,
     };
 
     // Create subscription stream
     const call = this.#client.Subscribe(request);
 
-    if (!this.#subscriptions.has(eventName)) {
-      this.#subscriptions.set(eventName, {
+    if (!this.#subscriptions.has(messageName)) {
+      this.#subscriptions.set(messageName, {
         call,
         handlers: new Set(),
         autoAck: options.autoAck,
@@ -245,25 +299,28 @@ class EnSyncEngine {
       });
     }
 
-    const subscription = this.#subscriptions.get(eventName);
+    const subscription = this.#subscriptions.get(messageName);
 
-    // Handle incoming events
-    call.on("data", async (eventData) => {
+    // Handle incoming messages
+    call.on("data", async (messageData) => {
       try {
-        const processedEvent = await this.#processEvent(eventData, options.appSecretKey);
+        const processedMessage = await this.#processMessage(messageData, options.appSecretKey);
 
-        if (processedEvent) {
-          // Call all handlers for this event
+        if (processedMessage) {
+          // Emit to EventEmitter listeners (message:messageName pattern)
+          this.emit(`message:${messageName}`, processedMessage);
+
+          // Call all handlers for this message (legacy subscription.on() pattern)
           for (const handler of subscription.handlers) {
             try {
-              const result = handler(processedEvent);
+              const result = handler(processedMessage);
               if (result instanceof Promise) {
                 await result;
               }
 
               // Auto-acknowledge if enabled
-              if (options.autoAck && processedEvent.idem && processedEvent.block) {
-                await this.#ack(processedEvent.idem, processedEvent.block, eventName);
+              if (options.autoAck && processedMessage.idem && processedMessage.block) {
+                await this.#ack(processedMessage.idem, processedMessage.block, messageName);
               }
             } catch (error) {
               this.#logError(`${SERVICE_NAME} Handler error:`, error);
@@ -271,32 +328,40 @@ class EnSyncEngine {
           }
         }
       } catch (error) {
-        this.#logError(`${SERVICE_NAME} Event processing error:`, error);
+        this.#logError(`${SERVICE_NAME} Message processing error:`, error);
       }
     });
 
     call.on("error", (error) => {
       this.#logError(`${SERVICE_NAME} Subscription error:`, error);
+      this.emit("error", error);
     });
 
     call.on("end", () => {
-      this.#log(`${SERVICE_NAME} Subscription ended for ${eventName}`);
+      this.#log(`${SERVICE_NAME} Subscription ended for ${messageName}`);
     });
 
-    this.#log(`${SERVICE_NAME} Successfully subscribed to ${eventName}`);
+    this.#log(`${SERVICE_NAME} Successfully subscribed to ${messageName}`);
 
-    return {
-      on: (handler) => this.#on(eventName, handler, options.appSecretKey, options.autoAck),
-      ack: (eventIdem, block) => this.#ack(eventIdem, block, eventName),
-      resume: () => this.#continueProcessing(eventName),
-      pause: (reason = "") => this.#pauseProcessing(eventName, reason),
-      defer: (eventIdem, delayMs = 1000, reason = "") =>
-        this.#deferEvent(eventIdem, eventName, delayMs, reason),
-      discard: (eventIdem, reason = "") => this.#discardEvent(eventIdem, eventName, reason),
-      rollback: (eventIdem, block) => this.#rollback(eventIdem, block),
-      replay: (eventIdem) => this.#replay(eventIdem, eventName, options.appSecretKey),
-      unsubscribe: async () => this.#unsubscribe(eventName),
+    // If handler was provided, add it immediately
+    if (handler && typeof handler === "function") {
+      subscription.handlers.add(handler);
+    }
+
+    const subscriptionObject = {
+      on: (handler) => this.#on(messageName, handler, options.appSecretKey, options.autoAck),
+      ack: (messageIdem, block) => this.#ack(messageIdem, block, messageName),
+      resume: () => this.#continueProcessing(messageName),
+      pause: (reason = "") => this.#pauseProcessing(messageName, reason),
+      defer: (messageIdem, delayMs = 1000, reason = "") =>
+        this.#deferMessage(messageIdem, messageName, delayMs, reason),
+      discard: (messageIdem, reason = "") => this.#discardMessage(messageIdem, messageName, reason),
+      rollback: (messageIdem, block) => this.#rollback(messageIdem, block),
+      replay: (messageIdem) => this.#replay(messageIdem, messageName, options.appSecretKey),
+      unsubscribe: async () => this.#unsubscribe(messageName),
     };
+
+    return subscriptionObject;
   }
 
   /**
@@ -429,7 +494,7 @@ class EnSyncEngine {
       this.#log(`${SERVICE_NAME} Sending authentication request...`);
 
       const request = {
-        access_key: this.#config.accessKey,
+        access_key: this.#config.appKey,
       };
 
       this.#client.Connect(request, (error, response) => {
@@ -460,12 +525,12 @@ class EnSyncEngine {
   }
 
   /**
-   * Publishes an event via gRPC
+   * Publishes a message via gRPC
    * @private
    */
-  #publishEvent(request) {
+  #publishMessage(request) {
     return new Promise((resolve, reject) => {
-      this.#client.PublishEvent(request, (error, response) => {
+      this.#client.PublishMessage(request, (error, response) => {
         if (error) {
           reject(new EnSyncError(error.message, "EnSyncPublishError"));
           return;
@@ -481,10 +546,10 @@ class EnSyncEngine {
   }
 
   /**
-   * Processes an event from the stream
+   * Processes a message from the stream
    * @private
    */
-  async #processEvent(eventData, appSecretKey) {
+  async #processMessage(messageData, appSecretKey) {
     try {
       const decryptionKey = appSecretKey || this.#config.appSecretKey || this.#config.clientHash;
 
@@ -494,7 +559,7 @@ class EnSyncEngine {
       }
 
       // Decode and decrypt payload
-      const decodedPayloadJson = Buffer.from(eventData.payload, "base64").toString("utf8");
+      const decodedPayloadJson = Buffer.from(messageData.payload, "base64").toString("utf8");
       const encryptedPayload = JSON.parse(decodedPayloadJson);
 
       let payload;
@@ -528,16 +593,16 @@ class EnSyncEngine {
       }
 
       return {
-        eventName: eventData.event_name,
-        idem: eventData.event_idem,
-        block: eventData.partition_block,
+        messageName: messageData.message_name,
+        idem: messageData.message_idem,
+        block: messageData.partition_block,
         timestamp: Date.now(),
         payload: payload,
-        metadata: eventData.metadata ? JSON.parse(eventData.metadata) : {},
-        sender: eventData.sender || null,
+        metadata: messageData.metadata ? JSON.parse(messageData.metadata) : {},
+        sender: messageData.sender || null,
       };
     } catch (error) {
-      this.#logError(`${SERVICE_NAME} Failed to process event:`, error);
+      this.#logError(`${SERVICE_NAME} Failed to process message:`, error);
       return null;
     }
   }
@@ -561,14 +626,14 @@ class EnSyncEngine {
   }
 
   /**
-   * Unsubscribes from an event
+   * Unsubscribes from messages
    * @private
    */
-  async #unsubscribe(eventName) {
+  async #unsubscribe(messageName) {
     return new Promise((resolve, reject) => {
       const request = {
         client_id: this.#config.clientId,
-        event_name: eventName,
+        message_name: messageName,
       };
 
       this.#client.Unsubscribe(request, (error, response) => {
@@ -578,12 +643,12 @@ class EnSyncEngine {
         }
 
         if (response.success) {
-          const subscription = this.#subscriptions.get(eventName);
+          const subscription = this.#subscriptions.get(messageName);
           if (subscription && subscription.call) {
             subscription.call.cancel();
           }
-          this.#subscriptions.delete(eventName);
-          this.#log(`${SERVICE_NAME} Successfully unsubscribed from ${eventName}`);
+          this.#subscriptions.delete(messageName);
+          this.#log(`${SERVICE_NAME} Successfully unsubscribed from ${messageName}`);
           resolve();
         } else {
           reject(new EnSyncError(response.message, "EnSyncSubscriptionError"));
@@ -593,19 +658,19 @@ class EnSyncEngine {
   }
 
   /**
-   * Acknowledges an event
+   * Acknowledges a message
    * @private
    */
-  async #ack(eventIdem, block, eventName) {
+  async #ack(messageIdem, block, messageName) {
     return new Promise((resolve, reject) => {
       const request = {
         client_id: this.#config.clientId,
-        event_idem: eventIdem,
-        event_name: eventName,
+        message_idem: messageIdem,
+        message_name: messageName,
         partition_block: block,
       };
 
-      this.#client.AcknowledgeEvent(request, (error, response) => {
+      this.#client.AcknowledgeMessage(request, (error, response) => {
         if (error) {
           reject(new EnSyncError(error.message, "EnSyncGenericError"));
           return;
@@ -630,18 +695,18 @@ class EnSyncEngine {
   }
 
   /**
-   * Replays an event
+   * Replays a message
    * @private
    */
-  async #replay(eventIdem, eventName, appSecretKey) {
+  async #replay(messageIdem, messageName, appSecretKey) {
     return new Promise((resolve, reject) => {
       const request = {
         client_id: this.#config.clientId,
-        event_idem: eventIdem,
-        event_name: eventName,
+        message_idem: messageIdem,
+        message_name: messageName,
       };
 
-      this.#client.ReplayEvent(request, async (error, response) => {
+      this.#client.ReplayMessage(request, async (error, response) => {
         if (error) {
           reject(new EnSyncError(error.message, "EnSyncReplayError"));
           return;
@@ -649,12 +714,12 @@ class EnSyncEngine {
 
         if (response.success) {
           try {
-            // Process the replayed event data
-            const eventData = JSON.parse(response.event_data);
-            const processedEvent = await this.#processEvent(eventData, appSecretKey);
-            resolve(processedEvent);
+            // Process the replayed message data
+            const messageData = JSON.parse(response.message_data);
+            const processedMessage = await this.#processMessage(messageData, appSecretKey);
+            resolve(processedMessage);
           } catch (err) {
-            reject(new EnSyncError("Failed to process replayed event", "EnSyncReplayError"));
+            reject(new EnSyncError("Failed to process replayed message", "EnSyncReplayError"));
           }
         } else {
           reject(new EnSyncError(response.message, "EnSyncReplayError"));
@@ -664,21 +729,21 @@ class EnSyncEngine {
   }
 
   /**
-   * Defers an event
+   * Defers a message
    * @private
    */
-  async #deferEvent(eventIdem, eventName, delayMs = 0, reason = "") {
+  async #deferMessage(messageIdem, messageName, delayMs = 0, reason = "") {
     return new Promise((resolve, reject) => {
       const request = {
         client_id: this.#config.clientId,
-        event_idem: eventIdem,
-        event_name: eventName,
+        message_idem: messageIdem,
+        message_name: messageName,
         delay_ms: delayMs,
         priority: 0,
         reason: reason,
       };
 
-      this.#client.DeferEvent(request, (error, response) => {
+      this.#client.DeferMessage(request, (error, response) => {
         if (error) {
           reject(new EnSyncError(error.message, "EnSyncDeferError"));
           return;
@@ -688,7 +753,7 @@ class EnSyncEngine {
           resolve({
             status: "success",
             action: "deferred",
-            eventId: eventIdem,
+            messageId: messageIdem,
             delayMs,
             scheduledDelivery: response.delivery_time,
             timestamp: Date.now(),
@@ -701,19 +766,19 @@ class EnSyncEngine {
   }
 
   /**
-   * Discards an event
+   * Discards a message
    * @private
    */
-  async #discardEvent(eventIdem, eventName, reason = "") {
+  async #discardMessage(messageIdem, messageName, reason = "") {
     return new Promise((resolve, reject) => {
       const request = {
         client_id: this.#config.clientId,
-        event_idem: eventIdem,
-        event_name: eventName,
+        message_idem: messageIdem,
+        message_name: messageName,
         reason: reason,
       };
 
-      this.#client.DiscardEvent(request, (error, response) => {
+      this.#client.DiscardMessage(request, (error, response) => {
         if (error) {
           reject(new EnSyncError(error.message, "EnSyncDiscardError"));
           return;
@@ -723,7 +788,7 @@ class EnSyncEngine {
           resolve({
             status: "success",
             action: "discarded",
-            eventId: eventIdem,
+            messageId: messageIdem,
             timestamp: Date.now(),
           });
         } else {
@@ -734,18 +799,18 @@ class EnSyncEngine {
   }
 
   /**
-   * Pauses event processing
+   * Pauses message processing
    * @private
    */
-  async #pauseProcessing(eventName, reason = "") {
+  async #pauseProcessing(messageName, reason = "") {
     return new Promise((resolve, reject) => {
       const request = {
         client_id: this.#config.clientId,
-        event_name: eventName,
+        message_name: messageName,
         reason: reason,
       };
 
-      this.#client.PauseEvents(request, (error, response) => {
+      this.#client.PauseMessages(request, (error, response) => {
         if (error) {
           reject(new EnSyncError(error.message, "EnSyncPauseError"));
           return;
@@ -755,7 +820,7 @@ class EnSyncEngine {
           resolve({
             status: "success",
             action: "paused",
-            eventName,
+            messageName,
             reason: reason || undefined,
           });
         } else {
@@ -766,17 +831,17 @@ class EnSyncEngine {
   }
 
   /**
-   * Continues event processing
+   * Continues message processing
    * @private
    */
-  async #continueProcessing(eventName) {
+  async #continueProcessing(messageName) {
     return new Promise((resolve, reject) => {
       const request = {
         client_id: this.#config.clientId,
-        event_name: eventName,
+        message_name: messageName,
       };
 
-      this.#client.ContinueEvents(request, (error, response) => {
+      this.#client.ContinueMessages(request, (error, response) => {
         if (error) {
           reject(new EnSyncError(error.message, "EnSyncContinueError"));
           return;
@@ -786,7 +851,7 @@ class EnSyncEngine {
           resolve({
             status: "success",
             action: "continued",
-            eventName,
+            messageName,
           });
         } else {
           reject(new EnSyncError(response.message, "EnSyncContinueError"));
