@@ -1,6 +1,6 @@
 {
   "name": "ensync-websocket-client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "WebSocket client for EnSync Engine - Real-time message-driven communication",
   "main": "websocket.js",
   "scripts": {

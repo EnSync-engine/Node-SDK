@@ -64,6 +64,9 @@ class EnSyncEngine extends EventEmitter {
   /** @type {Map<string, Set<Function>>} */
   #messageHandlers = new Map();
 
+  /** @type {Object|null} Shared multiplexed subscription stream */
+  #subscriptionStream = null;
+
   /**
    * Creates a new EnSync gRPC client
    * @param {string} url - gRPC server URL (e.g., "grpc://localhost:50051" or "grpcs://node.gms.ensync.cloud")
@@ -287,12 +290,70 @@ class EnSyncEngine extends EventEmitter {
       message_name: messageName,
     };
 
-    // Create subscription stream
-    const call = this.#client.Subscribe(request);
+    // Use shared subscription stream (server multiplexes all messages through first stream)
+    if (!this.#subscriptionStream) {
+      // First subscription - create the stream
+      this.#subscriptionStream = this.#client.Subscribe(request);
 
+      // Handle incoming messages from ALL subscriptions
+      this.#subscriptionStream.on("data", async (messageData) => {
+        try {
+          const msgName = messageData.message_name;
+          const subscription = this.#subscriptions.get(msgName);
+
+          if (!subscription) {
+            this.#logDebug(`${SERVICE_NAME} Received message for unsubscribed topic: ${msgName}`);
+            return;
+          }
+
+          const processedMessage = await this.#processMessage(
+            messageData,
+            subscription.appSecretKey
+          );
+
+          if (processedMessage) {
+            // Emit to EventEmitter listeners (message:messageName pattern)
+            this.emit(`message:${msgName}`, processedMessage);
+
+            // Call all handlers for this message
+            for (const handler of subscription.handlers) {
+              try {
+                const result = handler(processedMessage);
+                if (result instanceof Promise) {
+                  await result;
+                }
+
+                // Auto-acknowledge if enabled
+                if (subscription.autoAck && processedMessage.idem && processedMessage.block) {
+                  await this.#ack(processedMessage.idem, processedMessage.block, msgName);
+                }
+              } catch (error) {
+                this.#logError(`${SERVICE_NAME} Handler error:`, error);
+              }
+            }
+          }
+        } catch (error) {
+          this.#logError(`${SERVICE_NAME} Message processing error:`, error);
+        }
+      });
+
+      this.#subscriptionStream.on("error", (error) => {
+        this.#logError(`${SERVICE_NAME} Subscription stream error:`, error);
+        this.emit("error", error);
+      });
+
+      this.#subscriptionStream.on("end", () => {
+        this.#log(`${SERVICE_NAME} Subscription stream ended`);
+        this.#subscriptionStream = null;
+      });
+    } else {
+      // Subsequent subscriptions - just send Subscribe RPC to register the topic
+      this.#client.Subscribe(request);
+    }
+
+    // Register subscription locally
     if (!this.#subscriptions.has(messageName)) {
       this.#subscriptions.set(messageName, {
-        call,
         handlers: new Set(),
         autoAck: options.autoAck,
         appSecretKey: options.appSecretKey,
@@ -300,46 +361,6 @@ class EnSyncEngine extends EventEmitter {
     }
 
     const subscription = this.#subscriptions.get(messageName);
-
-    // Handle incoming messages
-    call.on("data", async (messageData) => {
-      try {
-        const processedMessage = await this.#processMessage(messageData, options.appSecretKey);
-
-        if (processedMessage) {
-          // Emit to EventEmitter listeners (message:messageName pattern)
-          this.emit(`message:${messageName}`, processedMessage);
-
-          // Call all handlers for this message (legacy subscription.on() pattern)
-          for (const handler of subscription.handlers) {
-            try {
-              const result = handler(processedMessage);
-              if (result instanceof Promise) {
-                await result;
-              }
-
-              // Auto-acknowledge if enabled
-              if (options.autoAck && processedMessage.idem && processedMessage.block) {
-                await this.#ack(processedMessage.idem, processedMessage.block, messageName);
-              }
-            } catch (error) {
-              this.#logError(`${SERVICE_NAME} Handler error:`, error);
-            }
-          }
-        }
-      } catch (error) {
-        this.#logError(`${SERVICE_NAME} Message processing error:`, error);
-      }
-    });
-
-    call.on("error", (error) => {
-      this.#logError(`${SERVICE_NAME} Subscription error:`, error);
-      this.emit("error", error);
-    });
-
-    call.on("end", () => {
-      this.#log(`${SERVICE_NAME} Subscription ended for ${messageName}`);
-    });
 
     this.#log(`${SERVICE_NAME} Successfully subscribed to ${messageName}`);
 
@@ -372,11 +393,10 @@ class EnSyncEngine extends EventEmitter {
     this.#state.shouldReconnect = false;
     this.#clearTimers();
 
-    // Close all active subscriptions
-    for (const [eventName, subscription] of this.#subscriptions.entries()) {
-      if (subscription.call) {
-        subscription.call.cancel();
-      }
+    // Cancel the shared subscription stream
+    if (this.#subscriptionStream) {
+      this.#subscriptionStream.cancel();
+      this.#subscriptionStream = null;
     }
 
     this.#subscriptions.clear();
@@ -631,6 +651,15 @@ class EnSyncEngine extends EventEmitter {
    */
   async #unsubscribe(messageName) {
     return new Promise((resolve, reject) => {
+      const subscription = this.#subscriptions.get(messageName);
+
+      if (!subscription) {
+        reject(
+          new EnSyncError(`No active subscription for ${messageName}`, "EnSyncSubscriptionError")
+        );
+        return;
+      }
+
       const request = {
         client_id: this.#config.clientId,
         message_name: messageName,
@@ -643,13 +672,11 @@ class EnSyncEngine extends EventEmitter {
         }
 
         if (response.success) {
-          const subscription = this.#subscriptions.get(messageName);
-          if (subscription && subscription.call) {
-            subscription.call.cancel();
-          }
+          // Only remove from local subscriptions map
+          // Do NOT cancel the shared stream as other subscriptions may be using it
           this.#subscriptions.delete(messageName);
           this.#log(`${SERVICE_NAME} Successfully unsubscribed from ${messageName}`);
-          resolve();
+          resolve(response);
         } else {
           reject(new EnSyncError(response.message, "EnSyncSubscriptionError"));
         }

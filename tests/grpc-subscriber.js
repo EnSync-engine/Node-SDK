@@ -5,7 +5,7 @@ console.log("Starting gRPC subscriber test...");
 
 const response = async () => {
   try {
-    const eventName = process.env.EVENT_TO_SUBSCRIBE || "progo/bicycles/coordinates";
+    const eventName = process.env.MESSAGE_TO_SUBSCRIBE || "progo/bicycles/coordinates";
     const ensyncClient = new EnSyncEngine("grpc://localhost:50051", {
       heartbeatInterval: 15000,
     });
@@ -44,6 +44,8 @@ const response = async () => {
         if (eventCount === 1) {
           // const pauseResult = await subscription.pause("Pausing for testing");
           // console.log("Pause Result:", pauseResult);
+          const unsub = await subscription.unsubscribe();
+          console.log("Unsubscribed from event:", unsub);
         }
 
         // Example: Defer an event
